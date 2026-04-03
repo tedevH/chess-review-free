@@ -20,8 +20,11 @@
     analyzeButton: null,
     board: null,
     boardCaption: null,
+    boardHelper: null,
     prevMoveButton: null,
     nextMoveButton: null,
+    engineMoveButton: null,
+    resetLineButton: null,
     dragPointerId: null,
     dragOffsetX: 0,
     dragOffsetY: 0,
@@ -30,6 +33,14 @@
     currentResults: [],
     currentPlyIndex: 0,
     boardOrientation: "white",
+    analysisActive: false,
+    analysisFen: null,
+    analysisMoves: [],
+    analysisSelectedSquare: null,
+    analysisLegalTargets: [],
+    analysisResult: null,
+    analysisPending: false,
+    analysisToken: 0,
     deepEvalToken: 0,
     destroyed: false
   };
@@ -45,6 +56,61 @@
       .replaceAll(">", "&gt;")
       .replaceAll('"', "&quot;")
       .replaceAll("'", "&#39;");
+  }
+
+  function createChessFromFen(fen) {
+    return fen ? new Chess(fen) : new Chess();
+  }
+
+  function moveSwingText(cpl) {
+    if (cpl <= 20) {
+      return "Tiny";
+    }
+
+    if (cpl <= 60) {
+      return "Small";
+    }
+
+    if (cpl <= 120) {
+      return "Medium";
+    }
+
+    if (cpl <= 220) {
+      return "Large";
+    }
+
+    return "Huge";
+  }
+
+  function currentBoardFen() {
+    return state.analysisActive ? state.analysisFen : fenForPly(state.currentPlyIndex);
+  }
+
+  function clearAnalysisSelection() {
+    state.analysisSelectedSquare = null;
+    state.analysisLegalTargets = [];
+  }
+
+  function resetAnalysisBoard() {
+    state.analysisActive = false;
+    state.analysisFen = null;
+    state.analysisMoves = [];
+    state.analysisResult = null;
+    state.analysisPending = false;
+    clearAnalysisSelection();
+  }
+
+  function ensureAnalysisBoard() {
+    if (state.analysisActive) {
+      return;
+    }
+
+    state.analysisActive = true;
+    state.analysisFen = currentBoardFen();
+    state.analysisMoves = [];
+    state.analysisResult = null;
+    state.analysisPending = false;
+    clearAnalysisSelection();
   }
 
   function parseGameId() {
@@ -158,6 +224,11 @@
             <div id="crf-board-caption" class="crf-muted">Start position</div>
             <button class="crf-nav" id="crf-next-move" type="button">Next</button>
           </div>
+          <div class="crf-board-actions">
+            <button class="crf-nav" id="crf-engine-move" type="button">Play Engine Move</button>
+            <button class="crf-nav" id="crf-reset-line" type="button">Return to Game</button>
+          </div>
+          <p id="crf-board-helper" class="crf-muted crf-board-helper">Click a piece on the board to test a different move from the position you are viewing.</p>
         </section>
         <section class="crf-card">
           <div class="crf-row">
@@ -201,8 +272,11 @@
     state.chart = root.querySelector("#crf-chart");
     state.board = root.querySelector("#crf-board");
     state.boardCaption = root.querySelector("#crf-board-caption");
+    state.boardHelper = root.querySelector("#crf-board-helper");
     state.prevMoveButton = root.querySelector("#crf-prev-move");
     state.nextMoveButton = root.querySelector("#crf-next-move");
+    state.engineMoveButton = root.querySelector("#crf-engine-move");
+    state.resetLineButton = root.querySelector("#crf-reset-line");
     state.evalFill = root.querySelector("#crf-eval-fill");
     state.evalTop = root.querySelector("#crf-eval-top");
     state.evalBottom = root.querySelector("#crf-eval-bottom");
@@ -210,6 +284,16 @@
     state.analyzeButton.addEventListener("click", runAnalysis);
     state.prevMoveButton.addEventListener("click", () => stepBoard(-1));
     state.nextMoveButton.addEventListener("click", () => stepBoard(1));
+    state.engineMoveButton.addEventListener("click", () => {
+      void playEngineMove();
+    });
+    state.resetLineButton.addEventListener("click", () => {
+      resetAnalysisBoard();
+      renderBoardAtPly(state.currentPlyIndex);
+    });
+    state.board.addEventListener("click", (event) => {
+      void handleBoardClick(event);
+    });
     window.addEventListener("keydown", handleKeyNavigation);
     renderBoardAtPly(0);
   }
@@ -409,6 +493,10 @@
   }
 
   function selectedScoreForPly(plyIndex) {
+    if (state.analysisActive) {
+      return state.analysisResult?.afterScore || { unit: "cp", value: 0 };
+    }
+
     if (!state.currentResults.length || plyIndex <= 0) {
       return { unit: "cp", value: 0 };
     }
@@ -440,6 +528,27 @@
     } else {
       state.evalTop.textContent = "";
       state.evalBottom.textContent = text;
+    }
+  }
+
+  function updateAnalysisActionButtons() {
+    if (state.engineMoveButton) {
+      state.engineMoveButton.disabled = state.analysisPending;
+      state.engineMoveButton.textContent = state.analysisPending ? "Analyzing..." : "Play Engine Move";
+    }
+
+    if (state.resetLineButton) {
+      state.resetLineButton.disabled = !state.analysisActive && !state.analysisMoves.length;
+    }
+
+    if (state.boardHelper) {
+      if (state.analysisPending) {
+        state.boardHelper.textContent = "Stockfish is analyzing your new move...";
+      } else if (state.analysisActive) {
+        state.boardHelper.textContent = "Analysis board is live. Try a move, let Stockfish grade it, or return to the original game.";
+      } else {
+        state.boardHelper.textContent = "Click a piece on the board to test a different move from the position you are viewing.";
+      }
     }
   }
 
@@ -479,12 +588,16 @@
   function renderSummary(results) {
     const white = results.filter((move) => move.color === "w");
     const black = results.filter((move) => move.color === "b");
+    const biggestMiss = results.reduce((worst, move) => (move.cpl > (worst?.cpl || -1) ? move : worst), null);
 
     const summaryCards = [
       { label: "White Accuracy", value: `${gameAccuracyFromMoves(white)}%` },
       { label: "Black Accuracy", value: `${gameAccuracyFromMoves(black)}%` },
       { label: "Moves Reviewed", value: String(results.length) },
-      { label: "Biggest Miss", value: `${Math.max(...results.map((move) => move.cpl), 0)} cp` }
+      {
+        label: "Toughest Moment",
+        value: biggestMiss ? `${biggestMiss.color === "w" ? `${biggestMiss.moveNumber}.` : `${biggestMiss.moveNumber}...`} ${biggestMiss.san}` : "None"
+      }
     ];
 
     state.summary.innerHTML = summaryCards
@@ -514,7 +627,7 @@
             </div>
             <div class="crf-move-meta">
               <span class="crf-kbd">Accuracy ${move.accuracy}%</span>
-              <span class="crf-kbd">Loss ${move.cpl} cp</span>
+              <span class="crf-kbd">Swing ${moveSwingText(move.cpl)}</span>
               <span class="crf-kbd">Eval ${escapeHtml(humanScore(move.playedScore))}</span>
             </div>
             <p class="crf-muted">Best move: <strong>${escapeHtml(move.bestSan || move.bestUci || "N/A")}</strong> · Played: <strong>${escapeHtml(move.san)}</strong></p>
@@ -527,6 +640,7 @@
     state.moves.querySelectorAll("[data-ply-index]").forEach((element) => {
       element.addEventListener("click", () => {
         const plyIndex = Number(element.getAttribute("data-ply-index"));
+        resetAnalysisBoard();
         renderBoardAtPly(plyIndex);
       });
     });
@@ -609,6 +723,17 @@
   }
 
   function captionForPly(plyIndex) {
+    if (state.analysisActive) {
+      if (!state.analysisResult) {
+        return state.analysisMoves.length
+          ? `Analysis board · ${state.analysisMoves.join(" ")}`
+          : "Analysis board · Choose a move to explore";
+      }
+
+      const line = state.analysisMoves.length ? ` · Line ${state.analysisMoves.join(" ")}` : "";
+      return `Analysis board · ${state.analysisResult.moveSan} · ${state.analysisResult.label} · Accuracy ${state.analysisResult.accuracy}%${line}`;
+    }
+
     if (!state.currentResults.length || plyIndex <= 0) {
       return "Start position";
     }
@@ -624,8 +749,8 @@
     }
 
     state.currentPlyIndex = clamp(plyIndex, 0, state.currentMoves.length);
-    const fen = fenForPly(state.currentPlyIndex);
-    const chess = fen ? new Chess(fen) : new Chess();
+    const fen = currentBoardFen();
+    const chess = createChessFromFen(fen);
     const files =
       state.boardOrientation === "black"
         ? ["h", "g", "f", "e", "d", "c", "b", "a"]
@@ -635,7 +760,7 @@
         ? [1, 2, 3, 4, 5, 6, 7, 8]
         : [8, 7, 6, 5, 4, 3, 2, 1];
     const selectedMove =
-      state.currentPlyIndex > 0
+      !state.analysisActive && state.currentPlyIndex > 0
         ? state.currentResults[Math.min(state.currentPlyIndex - 1, state.currentResults.length - 1)] ||
           state.currentMoves[Math.min(state.currentPlyIndex - 1, state.currentMoves.length - 1)]
         : null;
@@ -653,9 +778,11 @@
               sticker && selectedMove?.to === square
                 ? `<span class="crf-square-sticker ${sticker.className}" title="${escapeHtml(sticker.title)}">${escapeHtml(sticker.text)}</span>`
                 : "";
+            const isSelected = state.analysisSelectedSquare === square;
+            const isTarget = state.analysisLegalTargets.includes(square);
 
             return `
-              <div class="crf-square ${squareClass}" data-square="${square}">
+              <div class="crf-square ${squareClass}${isSelected ? " crf-square-selected" : ""}${isTarget ? " crf-square-target" : ""}" data-square="${square}">
                 ${stickerMarkup}
                 <span class="crf-piece">${escapeHtml(piece ? pieceGlyph(piece) : "")}</span>
               </div>
@@ -668,8 +795,11 @@
     state.boardCaption.textContent = captionForPly(state.currentPlyIndex);
     state.prevMoveButton.disabled = state.currentPlyIndex <= 0;
     state.nextMoveButton.disabled = state.currentPlyIndex >= state.currentMoves.length;
+    updateAnalysisActionButtons();
     updateEvalBar(state.currentPlyIndex);
-    void refineSelectedEval(state.currentPlyIndex);
+    if (!state.analysisActive) {
+      void refineSelectedEval(state.currentPlyIndex);
+    }
 
     state.moves.querySelectorAll("[data-ply-index]").forEach((element) => {
       const isActive = Number(element.getAttribute("data-ply-index")) === state.currentPlyIndex;
@@ -678,6 +808,9 @@
   }
 
   function stepBoard(direction) {
+    if (state.analysisActive) {
+      resetAnalysisBoard();
+    }
     renderBoardAtPly(state.currentPlyIndex + direction);
   }
 
@@ -702,6 +835,159 @@
       event.preventDefault();
       stepBoard(1);
     }
+  }
+
+  async function applyAnalysisMove(moveInput, precomputedBest = null) {
+    ensureAnalysisBoard();
+
+    const chess = createChessFromFen(state.analysisFen);
+    const beforeFen = chess.fen();
+    const played = chess.move(moveInput);
+
+    if (!played) {
+      state.analysisPending = false;
+      updateAnalysisActionButtons();
+      return;
+    }
+
+    state.analysisPending = true;
+    state.analysisToken += 1;
+    const token = state.analysisToken;
+    clearAnalysisSelection();
+    updateAnalysisActionButtons();
+    renderBoardAtPly(state.currentPlyIndex);
+
+    const afterFen = chess.fen();
+    const uci = `${played.from}${played.to}${played.promotion || ""}`;
+
+    try {
+      const stockfish = await getStockfish();
+      const profile = getAnalysisProfile(state.currentMoves.length + state.analysisMoves.length + 1);
+      const best = precomputedBest || (await stockfish.analyzeFen(beforeFen, { depth: profile.bestDepth }));
+      const after = await stockfish.analyzeFen(afterFen, { depth: profile.finalDepth });
+
+      if (token !== state.analysisToken) {
+        return;
+      }
+
+      const moverColor = played.color;
+      const bestScore = normalizeScoreForFen(best.score, beforeFen);
+      const afterScore = normalizeScoreForFen(after.score, afterFen);
+      const bestMoverScore = perspectiveScoreForColor(bestScore, moverColor);
+      const playedMoverScore = perspectiveScoreForColor(afterScore, moverColor);
+      const cpl = Math.max(0, Math.round(scoreToCp(bestMoverScore) - scoreToCp(playedMoverScore)));
+      const accuracy = accuracyFromCpl(cpl);
+      const label = classifyMove(cpl, uci, best.bestmove);
+
+      state.analysisFen = afterFen;
+      state.analysisMoves = [...state.analysisMoves, played.san];
+      state.analysisResult = {
+        moveSan: played.san,
+        moveUci: uci,
+        accuracy,
+        cpl,
+        label,
+        bestUci: best.bestmove,
+        bestSan: uciToSan(beforeFen, best.bestmove),
+        afterScore,
+        bestScore,
+        pvSan: pvToSan(beforeFen, best.pv)
+      };
+      setStatus(`Analysis board: ${played.san} is marked ${label.toLowerCase()} (${accuracy}% accuracy).`);
+    } catch (error) {
+      console.error("Analysis board move failed", error);
+      setStatus("Could not analyze that move.");
+    } finally {
+      if (token === state.analysisToken) {
+        state.analysisPending = false;
+        renderBoardAtPly(state.currentPlyIndex);
+      }
+    }
+  }
+
+  async function playEngineMove() {
+    ensureAnalysisBoard();
+
+    if (state.analysisPending) {
+      return;
+    }
+
+    const beforeFen = createChessFromFen(state.analysisFen).fen();
+    const stockfish = await getStockfish();
+    const profile = getAnalysisProfile(state.currentMoves.length + state.analysisMoves.length + 1);
+    state.analysisPending = true;
+    clearAnalysisSelection();
+    updateAnalysisActionButtons();
+    renderBoardAtPly(state.currentPlyIndex);
+
+    try {
+      const best = await stockfish.analyzeFen(beforeFen, { depth: profile.bestDepth });
+      if (!best?.bestmove || best.bestmove === "(none)") {
+        throw new Error("No engine move available.");
+      }
+      await applyAnalysisMove(
+        {
+          from: best.bestmove?.slice(0, 2),
+          to: best.bestmove?.slice(2, 4),
+          promotion: best.bestmove?.slice(4) || undefined
+        },
+        best
+      );
+    } catch (error) {
+      console.error("Engine move failed", error);
+      state.analysisPending = false;
+      updateAnalysisActionButtons();
+      setStatus("Could not play the engine move from this position.");
+      renderBoardAtPly(state.currentPlyIndex);
+    }
+  }
+
+  async function handleBoardClick(event) {
+    if (state.analysisPending) {
+      return;
+    }
+
+    const squareElement = event.target.closest("[data-square]");
+    if (!squareElement) {
+      return;
+    }
+
+    ensureAnalysisBoard();
+
+    const square = squareElement.getAttribute("data-square");
+    const chess = createChessFromFen(state.analysisFen);
+    const legalMoves = chess.moves({ square, verbose: true });
+    const piece = chess.get(square);
+
+    if (state.analysisSelectedSquare) {
+      const selectedMoves = chess.moves({ square: state.analysisSelectedSquare, verbose: true });
+      const chosenMove = selectedMoves.find((move) => move.to === square) || null;
+
+      if (chosenMove) {
+        await applyAnalysisMove({
+          from: chosenMove.from,
+          to: chosenMove.to,
+          promotion: chosenMove.promotion
+        });
+        return;
+      }
+
+      if (state.analysisSelectedSquare === square) {
+        clearAnalysisSelection();
+        renderBoardAtPly(state.currentPlyIndex);
+        return;
+      }
+    }
+
+    if (!piece || piece.color !== chess.turn() || !legalMoves.length) {
+      clearAnalysisSelection();
+      renderBoardAtPly(state.currentPlyIndex);
+      return;
+    }
+
+    state.analysisSelectedSquare = square;
+    state.analysisLegalTargets = legalMoves.map((move) => move.to);
+    renderBoardAtPly(state.currentPlyIndex);
   }
 
   function decodeTcn(tcn) {
@@ -959,6 +1245,7 @@
   async function runAnalysis() {
     try {
       ensureUi();
+      resetAnalysisBoard();
       state.root.classList.remove("crf-hidden");
       state.launcher.classList.add("crf-hidden");
       state.analyzeButton.disabled = true;
