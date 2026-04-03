@@ -7,10 +7,10 @@
 
   const PANEL_ID = "crf-root";
   const LAUNCHER_ID = "crf-launcher";
-  const MAX_MOVES_TO_ANALYZE = 80;
-  const MOVE_TIME_MS = 700;
-  const FOLLOW_UP_TIME_MS = 900;
-  const DEEP_EVAL_TIME_MS = 2200;
+  const MAX_MOVES_TO_ANALYZE = 60;
+  const MOVE_TIME_MS = 375;
+  const FOLLOW_UP_TIME_MS = 475;
+  const DEEP_EVAL_TIME_MS = 1100;
   const RETRY_DELAY_MS = 1200;
 
   const state = {
@@ -65,6 +65,30 @@
     }
 
     return null;
+  }
+
+  function getAnalysisTimings(moveCount) {
+    if (moveCount >= 50) {
+      return {
+        bestMoveMs: 240,
+        followUpMs: 300,
+        deepEvalMs: 700
+      };
+    }
+
+    if (moveCount >= 35) {
+      return {
+        bestMoveMs: 300,
+        followUpMs: 380,
+        deepEvalMs: 900
+      };
+    }
+
+    return {
+      bestMoveMs: MOVE_TIME_MS,
+      followUpMs: FOLLOW_UP_TIME_MS,
+      deepEvalMs: DEEP_EVAL_TIME_MS
+    };
   }
 
   function detectBoardOrientation() {
@@ -439,7 +463,8 @@
 
     try {
       const stockfish = await getStockfish();
-      const deep = await stockfish.analyzeFen(move.afterFen, DEEP_EVAL_TIME_MS);
+      const timings = getAnalysisTimings(state.currentMoves.length);
+      const deep = await stockfish.analyzeFen(move.afterFen, timings.deepEvalMs);
 
       if (token !== state.deepEvalToken) {
         return;
@@ -967,6 +992,7 @@
       }
 
       const stockfish = await getStockfish();
+      const timings = getAnalysisTimings(moves.length);
       const results = [];
 
       for (let index = 0; index < moves.length; index += 1) {
@@ -974,8 +1000,8 @@
         setStatus(`Analyzing move ${index + 1} of ${moves.length}: ${move.san}`);
         setProgress(index, moves.length);
 
-        const best = await stockfish.analyzeFen(move.beforeFen, MOVE_TIME_MS);
-        const playedPosition = await stockfish.analyzeFen(move.afterFen, FOLLOW_UP_TIME_MS);
+        const best = await stockfish.analyzeFen(move.beforeFen, timings.bestMoveMs);
+        const playedPosition = await stockfish.analyzeFen(move.afterFen, timings.followUpMs);
 
         const bestScore = normalizeScoreForFen(best.score, move.beforeFen);
         const afterScore = normalizeScoreForFen(playedPosition.score, move.afterFen);
