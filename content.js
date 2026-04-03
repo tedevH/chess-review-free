@@ -7,7 +7,6 @@
 
   const PANEL_ID = "crf-root";
   const LAUNCHER_ID = "crf-launcher";
-  const MAX_MOVES_TO_ANALYZE = 50;
   const RETRY_DELAY_MS = 1200;
 
   const state = {
@@ -983,8 +982,7 @@
         throw new Error("This extension only runs after the game has finished.");
       }
 
-      const allMoves = buildMoveList(gameData);
-      const moves = allMoves.slice(0, MAX_MOVES_TO_ANALYZE);
+      const moves = buildMoveList(gameData);
       state.currentMoves = moves;
       state.currentResults = [];
       state.currentPlyIndex = 0;
