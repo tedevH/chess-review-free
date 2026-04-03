@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "Chess Review Free",
+  "version": "0.1.0",
+  "description": "Free post-game analysis overlay for Chess.com using a local Stockfish engine.",
+  "permissions": [],
+  "host_permissions": [
+    "https://www.chess.com/*"
+  ],
+  "action": {
+    "default_title": "Chess Review Free",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.chess.com/game/live/*",
+        "https://www.chess.com/analysis/game/live/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "overlay.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "vendor-chess.js",
+        "vendor-stockfish.js",
+        "vendor-stockfish.wasm"
+      ],
+      "matches": [
+        "https://www.chess.com/*"
+      ]
+    }
+  ]
+}
