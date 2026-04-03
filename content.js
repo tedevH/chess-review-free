@@ -994,6 +994,8 @@
       const stockfish = await getStockfish();
       const timings = getAnalysisTimings(moves.length);
       const results = [];
+      const bestAnalyses = [];
+      let finalPositionAnalysis = null;
 
       for (let index = 0; index < moves.length; index += 1) {
         const move = moves[index];
@@ -1001,7 +1003,21 @@
         setProgress(index, moves.length);
 
         const best = await stockfish.analyzeFen(move.beforeFen, timings.bestMoveMs);
-        const playedPosition = await stockfish.analyzeFen(move.afterFen, timings.followUpMs);
+        bestAnalyses.push(best);
+      }
+
+      if (moves.length) {
+        setStatus(`Finishing final position check...`);
+        finalPositionAnalysis = await stockfish.analyzeFen(
+          moves[moves.length - 1].afterFen,
+          timings.followUpMs
+        );
+      }
+
+      for (let index = 0; index < moves.length; index += 1) {
+        const move = moves[index];
+        const best = bestAnalyses[index];
+        const playedPosition = bestAnalyses[index + 1] || finalPositionAnalysis;
 
         const bestScore = normalizeScoreForFen(best.score, move.beforeFen);
         const afterScore = normalizeScoreForFen(playedPosition.score, move.afterFen);
@@ -1027,9 +1043,12 @@
         });
 
         state.currentResults = results.slice();
-        renderSummary(results);
-        renderMoves(results);
-        renderChart(results);
+
+        if (index === moves.length - 1 || index % 6 === 0) {
+          renderSummary(results);
+          renderMoves(results);
+          renderChart(results);
+        }
       }
 
       setProgress(moves.length, moves.length);
