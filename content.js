@@ -7,10 +7,7 @@
 
   const PANEL_ID = "crf-root";
   const LAUNCHER_ID = "crf-launcher";
-  const MAX_MOVES_TO_ANALYZE = 60;
-  const MOVE_TIME_MS = 375;
-  const FOLLOW_UP_TIME_MS = 475;
-  const DEEP_EVAL_TIME_MS = 1100;
+  const MAX_MOVES_TO_ANALYZE = 50;
   const RETRY_DELAY_MS = 1200;
 
   const state = {
@@ -67,27 +64,27 @@
     return null;
   }
 
-  function getAnalysisTimings(moveCount) {
+  function getAnalysisProfile(moveCount) {
     if (moveCount >= 50) {
       return {
-        bestMoveMs: 240,
-        followUpMs: 300,
-        deepEvalMs: 700
+        bestDepth: 8,
+        finalDepth: 8,
+        deepEvalDepth: 10
       };
     }
 
     if (moveCount >= 35) {
       return {
-        bestMoveMs: 300,
-        followUpMs: 380,
-        deepEvalMs: 900
+        bestDepth: 9,
+        finalDepth: 9,
+        deepEvalDepth: 11
       };
     }
 
     return {
-      bestMoveMs: MOVE_TIME_MS,
-      followUpMs: FOLLOW_UP_TIME_MS,
-      deepEvalMs: DEEP_EVAL_TIME_MS
+      bestDepth: 10,
+      finalDepth: 10,
+      deepEvalDepth: 12
     };
   }
 
@@ -463,8 +460,8 @@
 
     try {
       const stockfish = await getStockfish();
-      const timings = getAnalysisTimings(state.currentMoves.length);
-      const deep = await stockfish.analyzeFen(move.afterFen, timings.deepEvalMs);
+      const profile = getAnalysisProfile(state.currentMoves.length);
+      const deep = await stockfish.analyzeFen(move.afterFen, { depth: profile.deepEvalDepth });
 
       if (token !== state.deepEvalToken) {
         return;
@@ -870,7 +867,7 @@
       }
     }
 
-    analyzeFen(fen, moveTimeMs) {
+    analyzeFen(fen, options = {}) {
       return new Promise((resolve) => {
         this.pending = {
           resolve,
@@ -878,7 +875,13 @@
           pv: ""
         };
         this.worker.postMessage(`position fen ${fen}`);
-        this.worker.postMessage(`go movetime ${moveTimeMs}`);
+        const depth = Number(options.depth);
+        if (Number.isFinite(depth) && depth > 0) {
+          this.worker.postMessage(`go depth ${depth}`);
+          return;
+        }
+        const moveTimeMs = Number(options.movetime);
+        this.worker.postMessage(`go movetime ${Number.isFinite(moveTimeMs) && moveTimeMs > 0 ? moveTimeMs : 250}`);
       });
     }
 
@@ -992,7 +995,7 @@
       }
 
       const stockfish = await getStockfish();
-      const timings = getAnalysisTimings(moves.length);
+      const profile = getAnalysisProfile(moves.length);
       const results = [];
       const bestAnalyses = [];
       let finalPositionAnalysis = null;
@@ -1002,7 +1005,7 @@
         setStatus(`Analyzing move ${index + 1} of ${moves.length}: ${move.san}`);
         setProgress(index, moves.length);
 
-        const best = await stockfish.analyzeFen(move.beforeFen, timings.bestMoveMs);
+        const best = await stockfish.analyzeFen(move.beforeFen, { depth: profile.bestDepth });
         bestAnalyses.push(best);
       }
 
@@ -1010,7 +1013,7 @@
         setStatus(`Finishing final position check...`);
         finalPositionAnalysis = await stockfish.analyzeFen(
           moves[moves.length - 1].afterFen,
-          timings.followUpMs
+          { depth: profile.finalDepth }
         );
       }
 
