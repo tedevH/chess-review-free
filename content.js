@@ -33,13 +33,17 @@
     currentResults: [],
     currentPlyIndex: 0,
     boardOrientation: "white",
+    viewerColor: "w",
     analysisActive: false,
     analysisFen: null,
+    analysisOriginFen: null,
     analysisMoves: [],
+    analysisByFen: {},
     analysisSelectedSquare: null,
     analysisLegalTargets: [],
     analysisResult: null,
     analysisPending: false,
+    analysisQueue: Promise.resolve(),
     analysisToken: 0,
     deepEvalToken: 0,
     destroyed: false
@@ -60,6 +64,70 @@
 
   function createChessFromFen(fen) {
     return fen ? new Chess(fen) : new Chess();
+  }
+
+  function tryNormalizeFen(fen) {
+    if (!fen || typeof fen !== "string") {
+      return null;
+    }
+
+    try {
+      return new Chess(fen.trim()).fen();
+    } catch {
+      return null;
+    }
+  }
+
+  function tryReadChessComBoardFen() {
+    const el = document.querySelector("chess-board");
+    if (!el) {
+      return null;
+    }
+
+    const candidates = [
+      () => (typeof el.fen === "string" ? el.fen : null),
+      () => (typeof el.position === "string" ? el.position : null),
+      () => (typeof el.getFen === "function" ? el.getFen() : null),
+      () => el.getAttribute?.("fen"),
+      () => el.game?.fen?.(),
+      () => el.game?.getFen?.(),
+      () => el._game?.fen?.(),
+      () => el.chessboard?.getFen?.()
+    ];
+
+    for (const get of candidates) {
+      try {
+        const value = get();
+        if (typeof value === "string" && value.includes("/")) {
+          return value.trim();
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
+    return null;
+  }
+
+  function inferPlyIndexFromGameLine(fen) {
+    const normalized = tryNormalizeFen(fen);
+    if (!normalized || !state.currentMoves.length) {
+      return null;
+    }
+
+    const start = new Chess().fen();
+    if (normalized === start) {
+      return 0;
+    }
+
+    for (let i = 0; i < state.currentMoves.length; i += 1) {
+      const after = tryNormalizeFen(state.currentMoves[i].afterFen);
+      if (after && after === normalized) {
+        return i + 1;
+      }
+    }
+
+    return null;
   }
 
   function moveSwingText(cpl) {
@@ -94,23 +162,52 @@
   function resetAnalysisBoard() {
     state.analysisActive = false;
     state.analysisFen = null;
+    state.analysisOriginFen = null;
     state.analysisMoves = [];
+    state.analysisByFen = {};
     state.analysisResult = null;
     state.analysisPending = false;
+    state.analysisQueue = Promise.resolve();
     clearAnalysisSelection();
   }
 
-  function ensureAnalysisBoard() {
+  function ensureAnalysisBoard(preferredSquare = null) {
     if (state.analysisActive) {
-      return;
+      return preferredSquare;
+    }
+
+    // Sync with Chess.com's main board: our currentPlyIndex only changes via this
+    // panel's controls, so stepping on Chess.com left us on ply 0 with a different
+    // visible position. Infer ply from FEN, or use the live FEN when it does not
+    // match our game line (still lets you sandbox from what you see).
+    const liveFen = tryReadChessComBoardFen();
+    const normalizedLive = liveFen ? tryNormalizeFen(liveFen) : null;
+    let inferredFromLive = null;
+
+    if (normalizedLive && state.currentMoves.length) {
+      inferredFromLive = inferPlyIndexFromGameLine(liveFen);
+      if (inferredFromLive !== null) {
+        state.currentPlyIndex = inferredFromLive;
+        renderBoardAtPly(state.currentPlyIndex);
+      }
+    }
+
+    let branchFen = fenForPly(state.currentPlyIndex);
+    if (inferredFromLive === null && normalizedLive) {
+      branchFen = normalizedLive;
     }
 
     state.analysisActive = true;
-    state.analysisFen = currentBoardFen();
+    state.analysisFen = branchFen;
+    state.analysisOriginFen = branchFen;
     state.analysisMoves = [];
+    state.analysisByFen = {};
     state.analysisResult = null;
     state.analysisPending = false;
+    state.analysisQueue = Promise.resolve();
     clearAnalysisSelection();
+
+    return preferredSquare;
   }
 
   function parseGameId() {
@@ -132,35 +229,266 @@
   function getAnalysisProfile(moveCount) {
     if (moveCount >= 50) {
       return {
-        bestDepth: 8,
-        finalDepth: 8,
-        deepEvalDepth: 10
+        bestDepth: 14,
+        finalDepth: 14,
+        deepEvalDepth: 16
       };
     }
 
     if (moveCount >= 35) {
       return {
-        bestDepth: 9,
-        finalDepth: 9,
-        deepEvalDepth: 11
+        bestDepth: 15,
+        finalDepth: 15,
+        deepEvalDepth: 17
       };
     }
 
     return {
-      bestDepth: 10,
-      finalDepth: 10,
-      deepEvalDepth: 12
+      bestDepth: 16,
+      finalDepth: 16,
+      deepEvalDepth: 18
     };
+  }
+
+  function viewerColorToBoardOrientation(viewerColor) {
+    return viewerColor === "b" ? "black" : "white";
   }
 
   function detectBoardOrientation() {
     const boardElement = document.querySelector("chess-board");
+    if (!boardElement) {
+      return "white";
+    }
 
-    if (boardElement?.classList.contains("flipped")) {
+    const o = boardElement.orientation;
+    if (o === "black" || o === "b") {
+      return "black";
+    }
+    if (o === "white" || o === "w") {
+      return "white";
+    }
+
+    const attr = boardElement.getAttribute?.("orientation");
+    if (attr === "black" || attr === "b") {
+      return "black";
+    }
+    if (attr === "white" || attr === "w") {
+      return "white";
+    }
+
+    if (boardElement.classList.contains("flipped")) {
       return "black";
     }
 
     return "white";
+  }
+
+  function normalizeHeaderName(name) {
+    if (!name) {
+      return "";
+    }
+    return String(name)
+      .replace(/\s*\([^)]*\)\s*$/, "")
+      .trim()
+      .toLowerCase();
+  }
+
+  /**
+   * Content scripts cannot read page `window.user` (isolated world). Run a tiny
+   * script in the page context and stash username/id on <html> for us to read.
+   */
+  function syncPageContextViewerIdentity() {
+    const marker = "data-crf-viewer-sync";
+    if (document.documentElement.getAttribute(marker) === "1") {
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.textContent = `(function(){
+      try {
+        var u = (window.user && window.user.username) ||
+          (window.chesscom && window.chesscom.user && window.chesscom.user.username) || "";
+        var uid = (window.user && (window.user.id || window.user.userId || window.user.uuid));
+        document.documentElement.setAttribute("data-crf-viewer-username", u || "");
+        document.documentElement.setAttribute("data-crf-viewer-id", uid != null ? String(uid) : "");
+        document.documentElement.setAttribute("${marker}", "1");
+      } catch (e) {}
+    })();`;
+    (document.head || document.documentElement).appendChild(script);
+    script.remove();
+  }
+
+  function scrapeUsernameFromChessDom() {
+    const hrefSelectors = [
+      "a.user-usernameComponent",
+      "a[class*='usernameComponent']",
+      "[data-testid='user-username'] a",
+      "nav a[href^='/member/']",
+      "#header a[href^='/member/']",
+      "a[href^='/member/']",
+      "a[href*='chess.com/member/']"
+    ];
+
+    for (const sel of hrefSelectors) {
+      for (const el of document.querySelectorAll(sel)) {
+        const href = el.getAttribute("href") || "";
+        const m = href.match(/\/member\/([^/?#]+)/i);
+        if (m) {
+          try {
+            return decodeURIComponent(m[1]).trim().toLowerCase();
+          } catch {
+            return m[1].trim().toLowerCase();
+          }
+        }
+      }
+    }
+
+    return "";
+  }
+
+  function getViewerUsernameFromPage() {
+    syncPageContextViewerIdentity();
+    const fromAttr = document.documentElement.getAttribute("data-crf-viewer-username");
+    if (fromAttr && fromAttr.trim()) {
+      return fromAttr.trim().toLowerCase();
+    }
+    return scrapeUsernameFromChessDom();
+  }
+
+  function getViewerIdFromPage() {
+    syncPageContextViewerIdentity();
+    const id = document.documentElement.getAttribute("data-crf-viewer-id");
+    return id && id.length ? id : null;
+  }
+
+  function usernameMatchesHeader(username, headerNormalized) {
+    if (!username || !headerNormalized) {
+      return false;
+    }
+    if (username === headerNormalized) {
+      return true;
+    }
+    const parts = headerNormalized.split(/\s+/).filter(Boolean);
+    const last = parts[parts.length - 1];
+    if (last && last === username) {
+      return true;
+    }
+    if (headerNormalized.includes(username)) {
+      return true;
+    }
+    return false;
+  }
+
+  function parseViewerColorFromGameData(gameData) {
+    const game = gameData?.game;
+    if (!game) {
+      return null;
+    }
+
+    const me = getViewerUsernameFromPage();
+
+    const headers = game.pgnHeaders || {};
+    const whiteHeader = normalizeHeaderName(headers.White);
+    const blackHeader = normalizeHeaderName(headers.Black);
+
+    if (me && usernameMatchesHeader(me, whiteHeader)) {
+      return "w";
+    }
+    if (me && usernameMatchesHeader(me, blackHeader)) {
+      return "b";
+    }
+
+    const whiteFromApi = normalizeHeaderName(
+      String(
+        game.whiteUsername ||
+          game.whiteMember?.username ||
+          game.whitePlayer?.username ||
+          (typeof game.white === "string" ? game.white : game.white?.username || "")
+      )
+    );
+    const blackFromApi = normalizeHeaderName(
+      String(
+        game.blackUsername ||
+          game.blackMember?.username ||
+          game.blackPlayer?.username ||
+          (typeof game.black === "string" ? game.black : game.black?.username || "")
+      )
+    );
+    if (me && whiteFromApi && usernameMatchesHeader(me, whiteFromApi)) {
+      return "w";
+    }
+    if (me && blackFromApi && usernameMatchesHeader(me, blackFromApi)) {
+      return "b";
+    }
+
+    const pc = game.playerColor ?? game.myColor ?? game.side ?? game.userColor;
+    if (pc === "white" || pc === 1 || pc === "1") {
+      return "w";
+    }
+    if (pc === "black" || pc === 2 || pc === "2") {
+      return "b";
+    }
+
+    const myId = getViewerIdFromPage();
+    const players = game.players;
+    if (players && myId != null) {
+      const sid = String(myId);
+      const matchSlot = (slot) =>
+        slot &&
+        (String(slot.userId) === sid ||
+          String(slot.uuid) === sid ||
+          String(slot.id) === sid ||
+          String(slot.username || "")
+            .trim()
+            .toLowerCase() === me);
+
+      if (matchSlot(players.top)) {
+        const c = players.top.color ?? players.top.pieceColor;
+        if (c === "white" || c === 1 || c === "1") {
+          return "w";
+        }
+        if (c === "black" || c === 2 || c === "2") {
+          return "b";
+        }
+      }
+      if (matchSlot(players.bottom)) {
+        const c = players.bottom.color ?? players.bottom.pieceColor;
+        if (c === "white" || c === 1 || c === "1") {
+          return "w";
+        }
+        if (c === "black" || c === 2 || c === "2") {
+          return "b";
+        }
+      }
+    }
+
+    if (Array.isArray(players)) {
+      for (const slot of players) {
+        if (!slot) {
+          continue;
+        }
+        const un = normalizeHeaderName(String(slot.username || slot.name || slot.handle || ""));
+        if (me && un && usernameMatchesHeader(me, un)) {
+          const c = slot.color ?? slot.pieceColor ?? slot.side;
+          if (c === "white" || c === 1 || c === "1") {
+            return "w";
+          }
+          if (c === "black" || c === 2 || c === "2") {
+            return "b";
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
+  function resolveViewerColor(gameData) {
+    const parsed = parseViewerColorFromGameData(gameData);
+    if (parsed) {
+      return parsed;
+    }
+    return detectBoardOrientation() === "black" ? "b" : "w";
   }
 
   function ensureUi() {
@@ -459,13 +787,22 @@
       return { unit: "cp", value: 0 };
     }
 
-    const parts = fen.split(" ");
-    const sideToMove = parts[1] || "w";
-    const multiplier = sideToMove === "w" ? 1 : -1;
+    // Stockfish UCI always reports scores from the perspective of the SIDE TO MOVE,
+    // not from White's perspective. We store scores White-centric throughout (positive
+    // = White is better), so we must flip whenever it is Black's turn.
+    let sideToMove = "w";
+    try {
+      if (fen) {
+        sideToMove = new Chess(fen).turn();
+      }
+    } catch {
+      // default to white
+    }
 
+    const flip = sideToMove === "b" ? -1 : 1;
     return {
       unit: score.unit,
-      value: score.value * multiplier
+      value: score.value * flip
     };
   }
 
@@ -492,9 +829,19 @@
     return (score.value / 100).toFixed(1);
   }
 
+  function formatEngineEvalText(score) {
+    if (!score) {
+      return "0.0";
+    }
+    if (score.unit === "mate") {
+      return `#${score.value}`;
+    }
+    return `${score.value >= 0 ? "+" : ""}${humanScore(score)}`;
+  }
+
   function selectedScoreForPly(plyIndex) {
     if (state.analysisActive) {
-      return state.analysisResult?.afterScore || { unit: "cp", value: 0 };
+      return state.analysisByFen[state.analysisFen]?.afterScore || state.analysisResult?.afterScore || { unit: "cp", value: 0 };
     }
 
     if (!state.currentResults.length || plyIndex <= 0) {
@@ -505,10 +852,25 @@
     return move.afterScore || { unit: "cp", value: 0 };
   }
 
+  /** Engine / stored scores are always White-centric (+ = White better). */
+  function displayScoreForPly(plyIndex) {
+    return selectedScoreForPly(plyIndex);
+  }
+
   function evalFractionFromScore(score) {
     const cp = scoreToCp(score);
     const normalized = clamp(cp / 400, -1, 1);
     return (normalized + 1) / 2;
+  }
+
+  /**
+   * Map White-centric eval to bar fill: high = White advantage. When the viewer is
+   * Black, invert so a tall bar reads as Black advantage (avoids "+ looks like White"
+   * after negating the number for "player perspective").
+   */
+  function evalBarFillFraction(score, viewerColor) {
+    const f = evalFractionFromScore(score);
+    return f;
   }
 
   function updateEvalBar(plyIndex) {
@@ -516,16 +878,20 @@
       return;
     }
 
-    const score = selectedScoreForPly(plyIndex);
-    const fraction = evalFractionFromScore(score);
-    const text = score.unit === "mate" ? `#${score.value}` : `${score.value >= 0 ? "+" : ""}${humanScore(score)}`;
+    const score = displayScoreForPly(plyIndex);
+    const fraction = evalBarFillFraction(score, state.viewerColor);
+    const text = formatEngineEvalText(score);
 
     state.evalFill.style.height = `${Math.round(fraction * 100)}%`;
 
     if (state.boardOrientation === "black") {
+      state.evalFill.style.top = "0";
+      state.evalFill.style.bottom = "auto";
       state.evalTop.textContent = text;
       state.evalBottom.textContent = "";
     } else {
+      state.evalFill.style.top = "auto";
+      state.evalFill.style.bottom = "0";
       state.evalTop.textContent = "";
       state.evalBottom.textContent = text;
     }
@@ -545,7 +911,8 @@
       if (state.analysisPending) {
         state.boardHelper.textContent = "Stockfish is analyzing your new move...";
       } else if (state.analysisActive) {
-        state.boardHelper.textContent = "Analysis board is live. Try a move, let Stockfish grade it, or return to the original game.";
+        const turnLabel = createChessFromFen(state.analysisFen).turn() === "w" ? "White" : "Black";
+        state.boardHelper.textContent = `Edit mode is live on the current position. ${turnLabel} to move. Click one of that side's pieces to see legal moves, click it again to unselect, or use Return to Game.`;
       } else {
         state.boardHelper.textContent = "Click a piece on the board to test a different move from the position you are viewing.";
       }
@@ -628,7 +995,7 @@
             <div class="crf-move-meta">
               <span class="crf-kbd">Accuracy ${move.accuracy}%</span>
               <span class="crf-kbd">Swing ${moveSwingText(move.cpl)}</span>
-              <span class="crf-kbd">Eval ${escapeHtml(humanScore(move.playedScore))}</span>
+              <span class="crf-kbd">Eval ${escapeHtml(formatEngineEvalText(move.afterScore || { unit: "cp", value: 0 }))}</span>
             </div>
             <p class="crf-muted">Best move: <strong>${escapeHtml(move.bestSan || move.bestUci || "N/A")}</strong> · Played: <strong>${escapeHtml(move.san)}</strong></p>
             <p class="crf-muted">Engine line: ${escapeHtml(move.pvSan || move.bestUci || "N/A")}</p>
@@ -639,8 +1006,11 @@
 
     state.moves.querySelectorAll("[data-ply-index]").forEach((element) => {
       element.addEventListener("click", () => {
+        if (state.analysisActive) {
+          setStatus("Edit mode is active. Use Return to Game to leave the analysis board.");
+          return;
+        }
         const plyIndex = Number(element.getAttribute("data-ply-index"));
-        resetAnalysisBoard();
         renderBoardAtPly(plyIndex);
       });
     });
@@ -665,7 +1035,10 @@
     }
 
     const points = results.map((move, index) => {
-      const normalized = clamp(scoreToCp(move.afterScore) / 100, -8, 8);
+      let normalized = clamp(scoreToCp(move.afterScore) / 100, -8, 8);
+      if (state.viewerColor === "b") {
+        normalized = -normalized;
+      }
       const x = (index / Math.max(results.length - 1, 1)) * width;
       const y = height / 2 - (normalized / 8) * (height / 2 - 8);
       return { x, y };
@@ -715,8 +1088,12 @@
   }
 
   function fenForPly(plyIndex) {
-    if (!state.currentMoves.length || plyIndex <= 0) {
+    if (!state.currentMoves.length || plyIndex < 0) {
       return null;
+    }
+
+    if (plyIndex === 0) {
+      return new Chess().fen();
     }
 
     return state.currentMoves[Math.min(plyIndex - 1, state.currentMoves.length - 1)].afterFen;
@@ -724,14 +1101,15 @@
 
   function captionForPly(plyIndex) {
     if (state.analysisActive) {
-      if (!state.analysisResult) {
+      const currentAnalysis = state.analysisByFen[state.analysisFen] || state.analysisResult;
+      if (!currentAnalysis) {
         return state.analysisMoves.length
-          ? `Analysis board · ${state.analysisMoves.join(" ")}`
-          : "Analysis board · Choose a move to explore";
+          ? `Edit mode · ${state.analysisMoves.join(" ")}`
+          : "Edit mode · Choose a move from this exact position";
       }
 
       const line = state.analysisMoves.length ? ` · Line ${state.analysisMoves.join(" ")}` : "";
-      return `Analysis board · ${state.analysisResult.moveSan} · ${state.analysisResult.label} · Accuracy ${state.analysisResult.accuracy}%${line}`;
+      return `Edit mode · ${currentAnalysis.moveSan} · ${currentAnalysis.label} · Accuracy ${currentAnalysis.accuracy}%${line}`;
     }
 
     if (!state.currentResults.length || plyIndex <= 0) {
@@ -793,8 +1171,8 @@
       .join("");
 
     state.boardCaption.textContent = captionForPly(state.currentPlyIndex);
-    state.prevMoveButton.disabled = state.currentPlyIndex <= 0;
-    state.nextMoveButton.disabled = state.currentPlyIndex >= state.currentMoves.length;
+    state.prevMoveButton.disabled = state.analysisActive || state.currentPlyIndex <= 0;
+    state.nextMoveButton.disabled = state.analysisActive || state.currentPlyIndex >= state.currentMoves.length;
     updateAnalysisActionButtons();
     updateEvalBar(state.currentPlyIndex);
     if (!state.analysisActive) {
@@ -809,7 +1187,8 @@
 
   function stepBoard(direction) {
     if (state.analysisActive) {
-      resetAnalysisBoard();
+      setStatus("Edit mode is active. Use Return to Game to leave the analysis board.");
+      return;
     }
     renderBoardAtPly(state.currentPlyIndex + direction);
   }
@@ -850,78 +1229,77 @@
       return;
     }
 
-    state.analysisPending = true;
-    state.analysisToken += 1;
-    const token = state.analysisToken;
+    const afterFen = chess.fen();
+    const token = ++state.analysisToken;
     clearAnalysisSelection();
+    state.analysisFen = afterFen;
+    state.analysisMoves = [...state.analysisMoves, played.san];
+    state.analysisResult = null;
+    state.analysisPending = true;
+    setStatus(`Edit mode: played ${played.san}. Stockfish is analyzing this move in the background...`);
     updateAnalysisActionButtons();
     renderBoardAtPly(state.currentPlyIndex);
-
-    const afterFen = chess.fen();
     const uci = `${played.from}${played.to}${played.promotion || ""}`;
+    state.analysisQueue = state.analysisQueue
+      .catch(() => {})
+      .then(async () => {
+        try {
+          const stockfish = await getStockfish();
+          const profile = getAnalysisProfile(state.currentMoves.length + state.analysisMoves.length + 1);
+          const best = precomputedBest || (await stockfish.analyzeFen(beforeFen, { depth: Math.min(profile.bestDepth, 10) }));
+          const after = await stockfish.analyzeFen(afterFen, { depth: Math.min(profile.finalDepth, 10) });
 
-    try {
-      const stockfish = await getStockfish();
-      const profile = getAnalysisProfile(state.currentMoves.length + state.analysisMoves.length + 1);
-      const best = precomputedBest || (await stockfish.analyzeFen(beforeFen, { depth: profile.bestDepth }));
-      const after = await stockfish.analyzeFen(afterFen, { depth: profile.finalDepth });
+          const moverColor = played.color;
+          const bestScore = normalizeScoreForFen(best.score, beforeFen);
+          const afterScore = normalizeScoreForFen(after.score, afterFen);
+          const bestMoverScore = perspectiveScoreForColor(bestScore, moverColor);
+          const playedMoverScore = perspectiveScoreForColor(afterScore, moverColor);
+          const cpl = Math.max(0, Math.round(scoreToCp(bestMoverScore) - scoreToCp(playedMoverScore)));
+          const accuracy = accuracyFromCpl(cpl);
+          const label = classifyMove(cpl, uci, best.bestmove);
+          const result = {
+            moveSan: played.san,
+            moveUci: uci,
+            accuracy,
+            cpl,
+            label,
+            bestUci: best.bestmove,
+            bestSan: uciToSan(beforeFen, best.bestmove),
+            afterScore,
+            bestScore,
+            pvSan: pvToSan(beforeFen, best.pv)
+          };
 
-      if (token !== state.analysisToken) {
-        return;
-      }
+          state.analysisByFen[afterFen] = result;
 
-      const moverColor = played.color;
-      const bestScore = normalizeScoreForFen(best.score, beforeFen);
-      const afterScore = normalizeScoreForFen(after.score, afterFen);
-      const bestMoverScore = perspectiveScoreForColor(bestScore, moverColor);
-      const playedMoverScore = perspectiveScoreForColor(afterScore, moverColor);
-      const cpl = Math.max(0, Math.round(scoreToCp(bestMoverScore) - scoreToCp(playedMoverScore)));
-      const accuracy = accuracyFromCpl(cpl);
-      const label = classifyMove(cpl, uci, best.bestmove);
-
-      state.analysisFen = afterFen;
-      state.analysisMoves = [...state.analysisMoves, played.san];
-      state.analysisResult = {
-        moveSan: played.san,
-        moveUci: uci,
-        accuracy,
-        cpl,
-        label,
-        bestUci: best.bestmove,
-        bestSan: uciToSan(beforeFen, best.bestmove),
-        afterScore,
-        bestScore,
-        pvSan: pvToSan(beforeFen, best.pv)
-      };
-      setStatus(`Analysis board: ${played.san} is marked ${label.toLowerCase()} (${accuracy}% accuracy).`);
-    } catch (error) {
-      console.error("Analysis board move failed", error);
-      setStatus("Could not analyze that move.");
-    } finally {
-      if (token === state.analysisToken) {
-        state.analysisPending = false;
-        renderBoardAtPly(state.currentPlyIndex);
-      }
-    }
+          if (state.analysisFen === afterFen || token === state.analysisToken) {
+            state.analysisResult = result;
+            setStatus(`Analysis board: ${played.san} is marked ${label.toLowerCase()} (${accuracy}% accuracy).`);
+            updateEvalBar(state.currentPlyIndex);
+          }
+        } catch (error) {
+          console.error("Analysis board move failed", error);
+          setStatus("Could not analyze that move.");
+        } finally {
+          if (token === state.analysisToken) {
+            state.analysisPending = false;
+            updateAnalysisActionButtons();
+            renderBoardAtPly(state.currentPlyIndex);
+          }
+        }
+      });
   }
 
   async function playEngineMove() {
     ensureAnalysisBoard();
 
-    if (state.analysisPending) {
-      return;
-    }
-
     const beforeFen = createChessFromFen(state.analysisFen).fen();
     const stockfish = await getStockfish();
     const profile = getAnalysisProfile(state.currentMoves.length + state.analysisMoves.length + 1);
-    state.analysisPending = true;
     clearAnalysisSelection();
-    updateAnalysisActionButtons();
-    renderBoardAtPly(state.currentPlyIndex);
 
     try {
-      const best = await stockfish.analyzeFen(beforeFen, { depth: profile.bestDepth });
+      const best = await stockfish.analyzeFen(beforeFen, { depth: Math.min(profile.bestDepth, 10) });
       if (!best?.bestmove || best.bestmove === "(none)") {
         throw new Error("No engine move available.");
       }
@@ -943,18 +1321,13 @@
   }
 
   async function handleBoardClick(event) {
-    if (state.analysisPending) {
-      return;
-    }
-
     const squareElement = event.target.closest("[data-square]");
     if (!squareElement) {
       return;
     }
 
-    ensureAnalysisBoard();
-
-    const square = squareElement.getAttribute("data-square");
+    const clickedSquare = squareElement.getAttribute("data-square");
+    const square = ensureAnalysisBoard(clickedSquare);
     const chess = createChessFromFen(state.analysisFen);
     const legalMoves = chess.moves({ square, verbose: true });
     const piece = chess.get(square);
@@ -980,6 +1353,9 @@
     }
 
     if (!piece || piece.color !== chess.turn() || !legalMoves.length) {
+      if (piece && piece.color !== chess.turn()) {
+        setStatus(`Edit mode: it is ${chess.turn() === "w" ? "White" : "Black"} to move from this position.`);
+      }
       clearAnalysisSelection();
       renderBoardAtPly(state.currentPlyIndex);
       return;
@@ -1093,6 +1469,7 @@
       URL.revokeObjectURL(workerUrl);
       this.phase = "boot";
       this.pending = null;
+      this.searchQueue = Promise.resolve();
       this.worker.addEventListener("message", (event) => this.handleLine(String(event.data || "")));
     }
 
@@ -1153,21 +1530,42 @@
     }
 
     analyzeFen(fen, options = {}) {
-      return new Promise((resolve) => {
-        this.pending = {
-          resolve,
-          score: null,
-          pv: ""
-        };
-        this.worker.postMessage(`position fen ${fen}`);
-        const depth = Number(options.depth);
-        if (Number.isFinite(depth) && depth > 0) {
-          this.worker.postMessage(`go depth ${depth}`);
-          return;
-        }
-        const moveTimeMs = Number(options.movetime);
-        this.worker.postMessage(`go movetime ${Number.isFinite(moveTimeMs) && moveTimeMs > 0 ? moveTimeMs : 250}`);
-      });
+      const runSearch = () =>
+        new Promise((resolve) => {
+          const request = {
+            score: null,
+            pv: "",
+            resolve: (payload) => {
+              clearTimeout(timeoutId);
+              resolve(payload);
+            }
+          };
+
+          const timeoutId = setTimeout(() => {
+            if (this.pending === request) {
+              this.pending = null;
+              resolve({
+                bestmove: "(none)",
+                score: request.score,
+                pv: request.pv
+              });
+            }
+          }, 8000);
+
+          this.pending = request;
+          this.worker.postMessage("stop");
+          this.worker.postMessage(`position fen ${fen}`);
+          const depth = Number(options.depth);
+          if (Number.isFinite(depth) && depth > 0) {
+            this.worker.postMessage(`go depth ${depth}`);
+            return;
+          }
+          const moveTimeMs = Number(options.movetime);
+          this.worker.postMessage(`go movetime ${Number.isFinite(moveTimeMs) && moveTimeMs > 0 ? moveTimeMs : 250}`);
+        });
+
+      this.searchQueue = this.searchQueue.catch(() => {}).then(runSearch);
+      return this.searchQueue;
     }
 
     terminate() {
@@ -1263,11 +1661,13 @@
       }
 
       const gameData = await fetchGameData(gameId);
-      state.boardOrientation = detectBoardOrientation();
 
       if (!isFinishedGame(gameData)) {
         throw new Error("This extension only runs after the game has finished.");
       }
+
+      state.viewerColor = resolveViewerColor(gameData);
+      state.boardOrientation = viewerColorToBoardOrientation(state.viewerColor);
 
       const moves = buildMoveList(gameData);
       state.currentMoves = moves;
@@ -1296,10 +1696,12 @@
 
       if (moves.length) {
         setStatus(`Finishing final position check...`);
-        finalPositionAnalysis = await stockfish.analyzeFen(
+        const finalRaw = await stockfish.analyzeFen(
           moves[moves.length - 1].afterFen,
           { depth: profile.finalDepth }
         );
+        // normalizeScoreForFen handles the side-to-move flip, so no manual negation needed.
+        finalPositionAnalysis = finalRaw;
       }
 
       for (let index = 0; index < moves.length; index += 1) {
@@ -1363,7 +1765,8 @@
     }
 
     ensureUi();
-    state.boardOrientation = detectBoardOrientation();
+    state.viewerColor = resolveViewerColor({});
+    state.boardOrientation = viewerColorToBoardOrientation(state.viewerColor);
     setStatus("Ready for post-game analysis.");
   }
 
