@@ -14,6 +14,14 @@
     launcher: null,
     status: null,
     progressBar: null,
+    resultBadge: null,
+    reasonLabel: null,
+    reasonText: null,
+    blunderStat: null,
+    mistakeStat: null,
+    habitLabel: null,
+    habitText: null,
+    insightList: null,
     summary: null,
     moves: null,
     chart: null,
@@ -248,6 +256,215 @@
       finalDepth: 16,
       deepEvalDepth: 18
     };
+  }
+
+  const MISTAKE_COPY = {
+    hung_piece: "You hang pieces in the middlegame.",
+    time_pressure: "Time pressure is turning decent positions into mistakes.",
+    late_game_blunder: "Late-game blunders are undoing your earlier work.",
+    early_game_mistake: "Early mistakes are putting you behind right away."
+  };
+
+  const STRENGTH_COPY = {
+    capitalized_blunder: "You capitalized on opponent mistakes.",
+    solid_endgame: "You converted the endgame cleanly.",
+    good_time_management: "You stayed composed as the game got longer.",
+    strong_opening: "You built the better position out of the opening."
+  };
+
+  const HABIT_COPY = {
+    hung_piece: "Hanging pieces",
+    time_pressure: "Time pressure mistakes",
+    late_game_blunder: "Late-game blunders",
+    early_game_mistake: "Early-game mistakes",
+    capitalized_blunder: "Converting advantages",
+    solid_endgame: "Solid endgames",
+    good_time_management: "Good time management",
+    strong_opening: "Strong openings"
+  };
+
+  function sendRuntimeMessage(message) {
+    return new Promise((resolve, reject) => {
+      try {
+        chrome.runtime.sendMessage(message, (response) => {
+          const lastError = chrome.runtime.lastError;
+          if (lastError) {
+            reject(new Error(lastError.message));
+            return;
+          }
+          resolve(response);
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  function resultForViewer(gameData) {
+    const result = String(gameData?.game?.pgnHeaders?.Result || "");
+    if (result === "1/2-1/2") {
+      return "draw";
+    }
+    if ((result === "1-0" && state.viewerColor === "w") || (result === "0-1" && state.viewerColor === "b")) {
+      return "win";
+    }
+    if ((result === "1-0" && state.viewerColor === "b") || (result === "0-1" && state.viewerColor === "w")) {
+      return "loss";
+    }
+    return "draw";
+  }
+
+  function countMovesByThreshold(moves, thresholdCp) {
+    return moves.filter((move) => move.cpl > thresholdCp).length;
+  }
+
+  function countMistakesOnly(moves) {
+    return moves.filter((move) => move.cpl > 100 && move.cpl <= 200).length;
+  }
+
+  function dominantTag(tags) {
+    const counts = {};
+    for (const tag of tags) {
+      counts[tag] = (counts[tag] || 0) + 1;
+    }
+    return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || "";
+  }
+
+  function buildGameTags(playerMoves, opponentMoves, result) {
+    const mistakeTags = [];
+    const goodTags = [];
+    const bigMistakes = playerMoves.filter((move) => move.cpl > 100);
+    const blunders = playerMoves.filter((move) => move.cpl > 200);
+    const openingMistakes = playerMoves.filter((move) => move.moveNumber <= 5 && move.cpl > 100);
+    const lateMistakes = playerMoves.filter((move) => move.moveNumber >= 20 && move.cpl > 100);
+    const endgameMoves = playerMoves.filter((move) => move.moveNumber >= 20);
+    const openingMoves = playerMoves.filter((move) => move.moveNumber <= 5);
+
+    if (blunders.length) {
+      mistakeTags.push("hung_piece");
+    }
+    if (lateMistakes.length >= 2) {
+      mistakeTags.push("time_pressure");
+    }
+    if (blunders.some((move) => move.moveNumber >= 20)) {
+      mistakeTags.push("late_game_blunder");
+    }
+    if (openingMistakes.length) {
+      mistakeTags.push("early_game_mistake");
+    }
+
+    if (result === "win" && opponentMoves.some((move) => move.cpl > 200)) {
+      goodTags.push("capitalized_blunder");
+    }
+    if (endgameMoves.length >= 4 && endgameMoves.every((move) => move.cpl <= 100)) {
+      goodTags.push("solid_endgame");
+    }
+    if (lateMistakes.length === 0 && endgameMoves.length >= 4) {
+      goodTags.push("good_time_management");
+    }
+    if (openingMoves.length >= 4 && openingMoves.every((move) => move.cpl <= 60)) {
+      goodTags.push("strong_opening");
+    }
+
+    if (!mistakeTags.length && result === "loss" && bigMistakes.length) {
+      mistakeTags.push("hung_piece");
+    }
+    if (!goodTags.length && result === "win") {
+      goodTags.push(opponentMoves.some((move) => move.cpl > 100) ? "capitalized_blunder" : "strong_opening");
+    }
+
+    return { mistakeTags, goodTags };
+  }
+
+  function buildInsights(playerMoves, opponentMoves) {
+    const insights = [];
+    const mistakesAfter20 = playerMoves.filter((move) => move.cpl > 100 && move.moveNumber > 20).length;
+    const totalMistakes = playerMoves.filter((move) => move.cpl > 100).length;
+    const biggestSwing = [...playerMoves].sort((a, b) => b.cpl - a.cpl)[0];
+
+    if (mistakesAfter20 > 0 && mistakesAfter20 >= Math.max(1, Math.ceil(totalMistakes / 2))) {
+      insights.push("Most mistakes happened after move 20.");
+    }
+    if (opponentMoves.filter((move) => move.cpl > 200).length) {
+      insights.push("Your opponent gave you at least one major swing to work with.");
+    }
+    if (biggestSwing) {
+      insights.push(`Biggest swing: move ${biggestSwing.moveNumber} (${biggestSwing.san}).`);
+    }
+    if (!insights.length) {
+      insights.push("This game was decided by a small number of critical swings.");
+    }
+
+    return insights.slice(0, 3);
+  }
+
+  function buildHabitCopy(patternSummary) {
+    const dominant = patternSummary?.dominant;
+    if (!dominant) {
+      return {
+        label: "Your habit",
+        text: "Play a few reviewed games and your strongest pattern will show up here."
+      };
+    }
+
+    const label = dominant.type === "strength" ? "Your strength" : "Your habit";
+    const habitName = HABIT_COPY[dominant.tag] || dominant.tag.replaceAll("_", " ");
+    return {
+      label,
+      text: `${habitName} (${dominant.count} / last ${dominant.window} games)`
+    };
+  }
+
+  function buildReviewSummary(gameData, results) {
+    const result = resultForViewer(gameData);
+    const playerMoves = results.filter((move) => move.color === state.viewerColor);
+    const opponentMoves = results.filter((move) => move.color !== state.viewerColor);
+    const blunders = countMovesByThreshold(playerMoves, 200);
+    const mistakes = countMistakesOnly(playerMoves);
+    const tags = buildGameTags(playerMoves, opponentMoves, result);
+    const reasonTag = result === "loss" ? dominantTag(tags.mistakeTags) : dominantTag(tags.goodTags);
+    const reasonText =
+      (result === "loss" ? MISTAKE_COPY[reasonTag] : STRENGTH_COPY[reasonTag]) ||
+      (result === "loss"
+        ? "A few big mistakes swung the game against you."
+        : result === "win"
+          ? "You handled the key moments better than your opponent."
+          : "The game came down to a few balanced turning points.");
+
+    return {
+      gameId: parseGameId() || `${Date.now()}`,
+      result,
+      blunders,
+      mistakes,
+      moveCount: results.length,
+      reasonTag,
+      reasonText,
+      mistakeTags: tags.mistakeTags,
+      goodTags: tags.goodTags,
+      insights: buildInsights(playerMoves, opponentMoves)
+    };
+  }
+
+  async function saveReviewAndGetPatterns(reviewSummary) {
+    try {
+      const response = await sendRuntimeMessage({
+        type: "crf:save-review",
+        payload: {
+          gameId: reviewSummary.gameId,
+          result: reviewSummary.result,
+          blunders: reviewSummary.blunders,
+          mistakes: reviewSummary.mistakes,
+          mistakeTags: reviewSummary.mistakeTags,
+          goodTags: reviewSummary.goodTags,
+          moveCount: reviewSummary.moveCount,
+          reasonTag: reviewSummary.reasonTag,
+          createdAt: Date.now()
+        }
+      });
+      return response?.ok ? response.summary : null;
+    } catch {
+      return null;
+    }
   }
 
   function viewerColorToBoardOrientation(viewerColor) {
@@ -499,7 +716,7 @@
     const launcher = document.createElement("button");
     launcher.id = LAUNCHER_ID;
     launcher.type = "button";
-    launcher.textContent = "Analyze Free";
+    launcher.textContent = "Game Review";
     launcher.addEventListener("click", () => {
       state.root.classList.remove("crf-hidden");
       launcher.classList.add("crf-hidden");
@@ -512,28 +729,48 @@
       <div class="crf-header" id="crf-drag-handle">
         <div>
           <h2 class="crf-title">Chess Review Free</h2>
-          <p class="crf-subtitle">Post-game analysis on Chess.com with local Stockfish in your browser.</p>
+          <p class="crf-subtitle">Instant post-game review with local Stockfish and habit tracking.</p>
         </div>
-        <button class="crf-close" id="crf-close" type="button" aria-label="Close review panel">&times;</button>
+        <button class="crf-close" id="crf-close" type="button" aria-label="Close review panel">Back to game</button>
       </div>
       <div class="crf-scroll">
-        <section class="crf-card">
-          <div class="crf-row">
-            <div>
-              <strong>Post-game only</strong>
-              <div class="crf-muted">Use this after a finished live game. The extension does not analyze active games.</div>
+        <section class="crf-hero">
+          <div class="crf-hero-main">
+            <div class="crf-result-badge" id="crf-result-badge" data-result="draw">Game Review</div>
+            <div class="crf-reason-label" id="crf-reason-label">Why this game mattered</div>
+            <div class="crf-reason-text" id="crf-reason-text">Run review to see the clearest reason you won or lost.</div>
+            <button class="crf-cta" id="crf-analyze" type="button">Analyze This Game</button>
+            <div class="crf-progress">
+              <div class="crf-progress-bar" id="crf-progress-bar"></div>
+            </div>
+            <p class="crf-muted" id="crf-status">Waiting for a finished Chess.com live game.</p>
+          </div>
+          <div class="crf-hero-side">
+            <div class="crf-hero-stat">
+              <span class="crf-stat-label">Blunders</span>
+              <span class="crf-hero-stat-value" id="crf-blunder-stat">0</span>
+            </div>
+            <div class="crf-hero-stat">
+              <span class="crf-stat-label">Mistakes</span>
+              <span class="crf-hero-stat-value" id="crf-mistake-stat">0</span>
+            </div>
+            <div class="crf-habit-card">
+              <div class="crf-reason-label" id="crf-habit-label">Your habit</div>
+              <div class="crf-habit-text" id="crf-habit-text">Play a few reviewed games and a pattern will show up here.</div>
             </div>
           </div>
-          <button class="crf-cta" id="crf-analyze" type="button">Run Analysis</button>
-          <div class="crf-progress">
-            <div class="crf-progress-bar" id="crf-progress-bar"></div>
+        </section>
+        <section class="crf-card">
+          <div class="crf-row">
+            <strong>Insights</strong>
+            <span class="crf-muted">Your biggest learning points from this game</span>
           </div>
-          <p class="crf-muted" id="crf-status">Waiting for a finished Chess.com live game.</p>
+          <ul class="crf-insight-list" id="crf-insight-list"></ul>
         </section>
         <section class="crf-card">
           <div class="crf-row">
             <strong>Review Board</strong>
-            <span class="crf-muted">Step through the analyzed game</span>
+            <span class="crf-muted">Step through the game or branch into edit mode</span>
           </div>
           <div class="crf-board-shell">
             <div class="crf-board-wrap">
@@ -560,8 +797,8 @@
         </section>
         <section class="crf-card">
           <div class="crf-row">
-            <strong>Summary</strong>
-            <span class="crf-muted">Estimated accuracy and engine-backed move grades</span>
+            <strong>Game Metrics</strong>
+            <span class="crf-muted">Quick scorecard for this review</span>
           </div>
           <div id="crf-summary" class="crf-summary-grid"></div>
         </section>
@@ -589,12 +826,18 @@
       launcher.classList.remove("crf-hidden");
     });
 
-    enableDragging(root);
-
     state.root = root;
     state.launcher = launcher;
     state.status = root.querySelector("#crf-status");
     state.progressBar = root.querySelector("#crf-progress-bar");
+    state.resultBadge = root.querySelector("#crf-result-badge");
+    state.reasonLabel = root.querySelector("#crf-reason-label");
+    state.reasonText = root.querySelector("#crf-reason-text");
+    state.blunderStat = root.querySelector("#crf-blunder-stat");
+    state.mistakeStat = root.querySelector("#crf-mistake-stat");
+    state.habitLabel = root.querySelector("#crf-habit-label");
+    state.habitText = root.querySelector("#crf-habit-text");
+    state.insightList = root.querySelector("#crf-insight-list");
     state.summary = root.querySelector("#crf-summary");
     state.moves = root.querySelector("#crf-moves");
     state.chart = root.querySelector("#crf-chart");
@@ -624,6 +867,16 @@
     });
     window.addEventListener("keydown", handleKeyNavigation);
     renderBoardAtPly(0);
+    setReviewHero(
+      {
+        result: "draw",
+        reasonText: "Run review to see the clearest reason you won or lost.",
+        blunders: 0,
+        mistakes: 0,
+        insights: ["Review will highlight one clear reason, blunder count, and your biggest trend."]
+      },
+      null
+    );
   }
 
   function enableDragging(root) {
@@ -670,6 +923,35 @@
   function setStatus(message) {
     if (state.status) {
       state.status.textContent = message;
+    }
+  }
+
+  function setReviewHero(summary, patternSummary) {
+    const habit = buildHabitCopy(patternSummary);
+    if (state.resultBadge) {
+      state.resultBadge.textContent = summary.result === "win" ? "You Won" : summary.result === "loss" ? "You Lost" : "Draw";
+      state.resultBadge.dataset.result = summary.result;
+    }
+    if (state.reasonLabel) {
+      state.reasonLabel.textContent = summary.result === "loss" ? "Why you lost" : summary.result === "win" ? "Why you won" : "Why it was drawn";
+    }
+    if (state.reasonText) {
+      state.reasonText.textContent = summary.reasonText;
+    }
+    if (state.blunderStat) {
+      state.blunderStat.textContent = String(summary.blunders);
+    }
+    if (state.mistakeStat) {
+      state.mistakeStat.textContent = String(summary.mistakes);
+    }
+    if (state.habitLabel) {
+      state.habitLabel.textContent = habit.label;
+    }
+    if (state.habitText) {
+      state.habitText.textContent = habit.text;
+    }
+    if (state.insightList) {
+      state.insightList.innerHTML = summary.insights.map((insight) => `<li>${escapeHtml(insight)}</li>`).join("");
     }
   }
 
@@ -953,17 +1235,23 @@
   }
 
   function renderSummary(results) {
-    const white = results.filter((move) => move.color === "w");
-    const black = results.filter((move) => move.color === "b");
-    const biggestMiss = results.reduce((worst, move) => (move.cpl > (worst?.cpl || -1) ? move : worst), null);
+    const playerMoves = results.filter((move) => move.color === state.viewerColor);
+    const opponentMoves = results.filter((move) => move.color !== state.viewerColor);
+    const biggestMiss = playerMoves.reduce((worst, move) => (move.cpl > (worst?.cpl || -1) ? move : worst), null);
+    const biggestPunish = opponentMoves.reduce((worst, move) => (move.cpl > (worst?.cpl || -1) ? move : worst), null);
 
     const summaryCards = [
-      { label: "White Accuracy", value: `${gameAccuracyFromMoves(white)}%` },
-      { label: "Black Accuracy", value: `${gameAccuracyFromMoves(black)}%` },
-      { label: "Moves Reviewed", value: String(results.length) },
+      { label: "Your Accuracy", value: `${gameAccuracyFromMoves(playerMoves)}%` },
+      { label: "Opponent Accuracy", value: `${gameAccuracyFromMoves(opponentMoves)}%` },
+      { label: "Blunders", value: String(countMovesByThreshold(playerMoves, 200)) },
+      { label: "Mistakes", value: String(countMistakesOnly(playerMoves)) },
       {
         label: "Toughest Moment",
         value: biggestMiss ? `${biggestMiss.color === "w" ? `${biggestMiss.moveNumber}.` : `${biggestMiss.moveNumber}...`} ${biggestMiss.san}` : "None"
+      },
+      {
+        label: "Best Punish",
+        value: biggestPunish ? `${biggestPunish.color === "w" ? `${biggestPunish.moveNumber}.` : `${biggestPunish.moveNumber}...`} ${biggestPunish.san}` : "None"
       }
     ];
 
@@ -1741,6 +2029,9 @@
         }
       }
 
+      const reviewSummary = buildReviewSummary(gameData, results);
+      const patternSummary = await saveReviewAndGetPatterns(reviewSummary);
+      setReviewHero(reviewSummary, patternSummary);
       setProgress(moves.length, moves.length);
       renderBoardAtPly(0);
       setStatus(`Finished. Reviewed ${results.length} ply with a local Stockfish engine.`);
