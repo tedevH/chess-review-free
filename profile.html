@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Chess DNA Profile</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+        --dna-page: #312e2b;
+        --dna-panel: #262421;
+        --dna-card: #2b2926;
+        --dna-card-soft: #302d29;
+        --dna-border: rgba(255, 255, 255, 0.08);
+        --dna-text: #f0f0f0;
+        --dna-text-soft: #c8c3bc;
+        --dna-muted: #a8a29a;
+        --dna-green: #81b64c;
+        --dna-green-hover: #6fa13e;
+        --dna-gold: #c2a878;
+        --dna-amber: #b88a4a;
+      }
+
+      body {
+        margin: 0;
+        background: var(--dna-page);
+        color: var(--dna-text);
+      }
+
+      main {
+        max-width: 1240px;
+        margin: 0 auto;
+        padding: 28px 22px 56px;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: clamp(34px, 4vw, 52px);
+        line-height: 1.02;
+        letter-spacing: -0.03em;
+      }
+
+      h2 {
+        margin: 0 0 10px;
+        font-size: 20px;
+        letter-spacing: -0.01em;
+      }
+
+      p {
+        margin: 0;
+        color: var(--dna-text-soft);
+        line-height: 1.6;
+        font-size: 15px;
+      }
+
+      .hero {
+        margin-bottom: 26px;
+        padding: 28px 30px;
+        border-radius: 18px;
+        background: var(--dna-panel);
+        border: 1px solid var(--dna-border);
+        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.16);
+      }
+
+      .hero-summary {
+        max-width: 840px;
+        font-size: 16px;
+      }
+
+      .card {
+        background: var(--dna-card);
+        border: 1px solid var(--dna-border);
+        border-radius: 16px;
+        padding: 18px;
+      }
+
+      .card strong {
+        display: block;
+        margin-bottom: 8px;
+        font-size: 18px;
+      }
+
+      .dashboard {
+        display: grid;
+        grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.95fr);
+        gap: 18px;
+        align-items: start;
+        margin-bottom: 26px;
+      }
+
+      ul {
+        margin: 0;
+        padding-left: 18px;
+        color: var(--dna-text-soft);
+      }
+
+      li + li {
+        margin-top: 9px;
+      }
+
+      .game-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .game-row {
+        padding: 14px 16px;
+        border-radius: 14px;
+        background: var(--dna-card);
+        border: 1px solid var(--dna-border);
+      }
+
+      .game-top {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 6px;
+        font-size: 13px;
+      }
+
+      .muted {
+        color: var(--dna-muted);
+      }
+
+      .locked {
+        color: var(--dna-gold);
+      }
+
+      .eyebrow {
+        margin-bottom: 8px;
+        color: var(--dna-gold);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      .card-label {
+        margin-bottom: 10px;
+        color: var(--dna-gold);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .card-copy {
+        color: var(--dna-text-soft);
+      }
+
+      .insight-card strong {
+        font-size: 24px;
+        line-height: 1.18;
+      }
+
+      .metric-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+        margin-bottom: 18px;
+      }
+
+      .metric-card strong {
+        font-size: 24px;
+        color: var(--dna-text);
+      }
+
+      .teaching-list {
+        display: grid;
+        gap: 12px;
+      }
+
+      .teaching-row {
+        padding: 12px 14px;
+        border-radius: 14px;
+        background: var(--dna-card-soft);
+        border: 1px solid var(--dna-border);
+      }
+
+      .teaching-row strong {
+        display: block;
+        margin-bottom: 4px;
+        font-size: 15px;
+      }
+
+      .teaching-row p {
+        color: var(--dna-text-soft);
+        font-size: 14px;
+      }
+
+      .bullet-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .bullet-item {
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+        padding: 12px 14px;
+        border-radius: 14px;
+        background: var(--dna-card-soft);
+        border: 1px solid var(--dna-border);
+        color: var(--dna-text-soft);
+        font-size: 14px;
+        line-height: 1.55;
+      }
+
+      .bullet-item::before {
+        content: "";
+        width: 8px;
+        height: 8px;
+        margin-top: 7px;
+        border-radius: 999px;
+        background: var(--dna-green);
+        flex: 0 0 auto;
+      }
+
+      .stack {
+        display: grid;
+        gap: 16px;
+      }
+
+      .hero-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 14px;
+      }
+
+      button {
+        border: 0;
+        border-radius: 8px;
+        padding: 10px 16px;
+        font-weight: 600;
+        color: #1c1c1c;
+        background: var(--dna-green);
+        cursor: pointer;
+        border: 1px solid var(--dna-border);
+        transition: background 0.15s ease;
+      }
+
+      .ghost-btn {
+        background: #34312e;
+        color: var(--dna-text-soft);
+      }
+
+      .accent-btn {
+        background: var(--dna-green);
+        color: #11130f;
+        border-color: rgba(0, 0, 0, 0.15);
+      }
+
+      button:hover {
+        background: var(--dna-green-hover);
+      }
+
+      .ghost-btn:hover {
+        background: #3b3734;
+      }
+
+      .two-col {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .full-width {
+        margin-top: 24px;
+      }
+
+      @media (max-width: 980px) {
+        .dashboard {
+          grid-template-columns: 1fr;
+        }
+
+        .metric-grid,
+        .two-col {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="hero">
+        <div class="eyebrow">Your Chess DNA</div>
+        <h1 id="profile-reveal">Loading your Chess DNA...</h1>
+        <p id="profile-summary" class="hero-summary">Loading your Chess DNA...</p>
+        <div class="hero-actions">
+          <button id="profile-upgrade-btn" class="accent-btn" type="button" hidden>Upgrade with Stripe</button>
+          <button id="profile-back-btn" class="ghost-btn" type="button">Back to Chess.com</button>
+        </div>
+      </section>
+
+      <section class="dashboard">
+        <div class="stack">
+          <div class="card insight-card">
+            <div class="card-label">Your style so far</div>
+            <strong id="archetype-title">-</strong>
+            <p id="archetype-copy" class="card-copy">Loading your current style...</p>
+          </div>
+
+          <div class="card insight-card">
+            <div class="card-label">What's holding you back</div>
+            <strong id="main-focus-title">-</strong>
+            <p id="main-focus-copy" class="card-copy">Loading your biggest leak...</p>
+          </div>
+
+          <div class="card insight-card">
+            <div class="card-label">What to fix first</div>
+            <strong id="fix-first-title">-</strong>
+            <p id="fix-first-copy" class="card-copy">Loading your first priority...</p>
+          </div>
+
+          <div class="card">
+            <div class="card-label">How to improve this</div>
+            <div id="improvement-actions" class="bullet-list">
+              <div class="bullet-item muted">Loading practical actions...</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-label">Training plan</div>
+            <div id="training-plan" class="bullet-list">
+              <div class="bullet-item muted">Loading training plan...</div>
+            </div>
+          </div>
+
+          <div class="two-col">
+            <div class="card">
+              <div class="card-label">Best resource types</div>
+              <div id="resource-types" class="bullet-list">
+                <div class="bullet-item muted">Loading study resources...</div>
+              </div>
+            </div>
+            <div class="card insight-card">
+              <div class="card-label">What good progress would look like</div>
+              <strong id="progress-title">-</strong>
+              <p id="progress-copy" class="card-copy">Loading progress marker...</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="stack">
+          <section class="metric-grid">
+            <div class="card metric-card">
+              <strong id="weakest-phase">-</strong>
+              <p>Weakest phase</p>
+            </div>
+            <div class="card metric-card">
+              <strong id="stable-phase">-</strong>
+              <p>Most stable phase</p>
+            </div>
+            <div class="card metric-card">
+              <strong id="trend-text">-</strong>
+              <p>Recent trend</p>
+            </div>
+          </section>
+
+          <div class="card insight-card">
+            <div class="card-label">What to work on next</div>
+            <strong id="improvement-title">-</strong>
+            <p id="improvement-copy" class="card-copy">Loading your next training edge...</p>
+          </div>
+
+          <div class="card insight-card">
+            <div class="card-label">Watch for this</div>
+            <strong id="warning-title">-</strong>
+            <p id="warning-copy" class="card-copy">Loading the pattern to watch...</p>
+          </div>
+
+          <div class="card">
+            <h2>Recurring Mistakes</h2>
+            <div id="mistake-list" class="teaching-list">
+              <div class="teaching-row muted">Loading mistakes...</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2>Recurring Strengths</h2>
+            <div id="strength-list" class="teaching-list">
+              <div class="teaching-row muted">Loading strengths...</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="full-width">
+        <h2>Game Library</h2>
+        <div id="game-library" class="game-list">
+          <div class="game-row muted">Loading saved games...</div>
+        </div>
+      </section>
+    </main>
+    <script src="storage.js"></script>
+    <script src="stats.js"></script>
+    <script src="profile.js"></script>
+  </body>
+</html>

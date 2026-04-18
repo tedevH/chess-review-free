@@ -41,3 +41,69 @@ It is intentionally framed as a post-game analysis tool. If the game result is s
 
 - The move grades and accuracy percentages are engine-based estimates, not a byte-for-byte clone of Chess.com's proprietary review formulas.
 - The included Stockfish engine is GPL-licensed. If you distribute this extension, keep the engine license and attribution with the project.
+
+## Stripe Test Mode Verification
+
+This extension now supports a local Stripe test-mode verification flow for the `$8/month` Pro subscription.
+
+### Environment variables
+
+Create [`stripe-test-server/.env`](/Users/changilhwang/Downloads/chess-review-free-main%202/stripe-test-server/.env.example) from the example file and set:
+
+- `STRIPE_SECRET_KEY`
+- `STRIPE_PUBLISHABLE_KEY`
+- `STRIPE_PRICE_ID_MONTHLY`
+- `STRIPE_WEBHOOK_SECRET`
+- `APP_BASE_URL`
+
+Recommended local value:
+
+- `APP_BASE_URL=http://localhost:3000`
+
+### Local server
+
+The local verification server lives in [`stripe-test-server/server.js`](/Users/changilhwang/Downloads/chess-review-free-main%202/stripe-test-server/server.js).
+
+It handles:
+
+- `checkout.session.completed`
+- `customer.subscription.created`
+- `customer.subscription.updated`
+- `customer.subscription.deleted`
+- `invoice.paid`
+- `invoice.payment_failed`
+
+It verifies webhook signatures with `STRIPE_WEBHOOK_SECRET` and stores a small local subscription state file under `stripe-test-server/data/`.
+
+### Local testing steps
+
+1. Install server dependencies:
+   - `cd "/Users/changilhwang/Downloads/chess-review-free-main 2/stripe-test-server"`
+   - `npm install`
+2. Copy `.env.example` to `.env` and fill in your Stripe test keys and monthly Price ID.
+3. Start the local Stripe test server:
+   - `npm start`
+4. Run the Stripe CLI listener:
+   - `stripe listen --forward-to localhost:3000/api/stripe/webhook`
+5. Copy the webhook signing secret printed by `stripe listen` into `STRIPE_WEBHOOK_SECRET`.
+6. Refresh the Chrome extension in `chrome://extensions`.
+7. If you want to verify the real Pro unlock instead of the dev bypass, set `ownerBypass` to `false` in `chrome.storage.local`.
+8. Click `Upgrade with Stripe` or `View Your Chess DNA` from the extension and complete Checkout with a Stripe test card.
+9. Confirm local logs show:
+   - checkout session created
+   - webhook received
+   - event type
+   - whether the user was upgraded to Pro
+   - whether premium unlock logic ran
+10. Reopen the extension popup or Chess DNA overlay and confirm premium features unlock.
+
+### Testing checklist
+
+1. Start the local app server on `localhost:3000`.
+2. Run Stripe CLI:
+   - `stripe listen --forward-to localhost:3000/api/stripe/webhook`
+3. Use Stripe test mode and complete Checkout with a test card.
+4. Confirm `checkout.session.completed` is received locally.
+5. Confirm the extension user becomes `Pro`.
+6. Refresh or reopen the extension and confirm premium features unlock.
+7. Later, use Stripe sandbox simulations or test clocks to verify renewals and failed payments.

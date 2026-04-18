@@ -12,6 +12,9 @@
   const state = {
     root: null,
     launcher: null,
+    dnaLauncher: null,
+    dnaLock: null,
+    dnaOverlay: null,
     status: null,
     progressBar: null,
     resultBadge: null,
@@ -27,8 +30,11 @@
     chart: null,
     analyzeButton: null,
     board: null,
+    boardCoordinates: null,
     boardCaption: null,
     boardHelper: null,
+    coachLabel: null,
+    coachExplanation: null,
     prevMoveButton: null,
     nextMoveButton: null,
     engineMoveButton: null,
@@ -262,14 +268,29 @@
     hung_piece: "You hang pieces in the middlegame.",
     time_pressure: "Time pressure is turning decent positions into mistakes.",
     late_game_blunder: "Late-game blunders are undoing your earlier work.",
-    early_game_mistake: "Early mistakes are putting you behind right away."
+    early_game_mistake: "Early mistakes are putting you behind right away.",
+    opening_principle_violation: "You are drifting from basic opening principles too early.",
+    slow_move: "Slow developing moves are costing you time and initiative.",
+    missed_threat: "You missed your opponent's threat in a critical moment.",
+    bad_trade: "A bad trade left you worse in the resulting position.",
+    king_safety: "Your king became too exposed and the position collapsed.",
+    missed_tactic: "You missed a tactical idea that changed the game.",
+    fork_tactic: "You missed a double attack that changed the position immediately.",
+    back_rank: "Your back rank became a real tactical problem.",
+    isolated_pawn: "Your pawn structure picked up a weakness that was easy to target.",
+    passed_pawn: "You let a passed pawn become the main story of the position."
   };
 
   const STRENGTH_COPY = {
     capitalized_blunder: "You capitalized on opponent mistakes.",
     solid_endgame: "You converted the endgame cleanly.",
     good_time_management: "You stayed composed as the game got longer.",
-    strong_opening: "You built the better position out of the opening."
+    strong_opening: "You built the better position out of the opening.",
+    strong_attack: "You created pressure on the king and made it count.",
+    good_conversion: "You kept control after getting the advantage.",
+    loose_piece_punished: "You punished a loose piece immediately.",
+    tactical_shot: "You found a tactical shot that changed the position.",
+    passed_pawn_play: "You used a passed pawn or endgame runner well."
   };
 
   const HABIT_COPY = {
@@ -277,11 +298,2049 @@
     time_pressure: "Time pressure mistakes",
     late_game_blunder: "Late-game blunders",
     early_game_mistake: "Early-game mistakes",
+    opening_principle_violation: "Opening principle mistakes",
+    slow_move: "Slow moves",
+    missed_threat: "Missing threats",
+    bad_trade: "Bad trades",
+    king_safety: "King safety mistakes",
+    missed_tactic: "Missed tactics",
+    fork_tactic: "Missing forks",
+    back_rank: "Back-rank mistakes",
+    isolated_pawn: "Creating pawn weaknesses",
+    passed_pawn: "Ignoring passed pawns",
     capitalized_blunder: "Converting advantages",
     solid_endgame: "Solid endgames",
     good_time_management: "Good time management",
-    strong_opening: "Strong openings"
+    strong_opening: "Strong openings",
+    strong_attack: "Attacking well",
+    good_conversion: "Good conversion",
+    loose_piece_punished: "Punishing loose pieces",
+    tactical_shot: "Tactical shots",
+    passed_pawn_play: "Passed-pawn play"
   };
+
+  const PIECE_NAMES = {
+    p: "pawn",
+    n: "knight",
+    b: "bishop",
+    r: "rook",
+    q: "queen",
+    k: "king"
+  };
+
+  const PIECE_VALUES = {
+    p: 1,
+    n: 3,
+    b: 3,
+    r: 5,
+    q: 9,
+    k: 100
+  };
+
+  const STARTING_SQUARES = {
+    w: {
+      k: ["e1"],
+      q: ["d1"],
+      r: ["a1", "h1"],
+      b: ["c1", "f1"],
+      n: ["b1", "g1"]
+    },
+    b: {
+      k: ["e8"],
+      q: ["d8"],
+      r: ["a8", "h8"],
+      b: ["c8", "f8"],
+      n: ["b8", "g8"]
+    }
+  };
+
+  const CONCEPT_TAXONOMY = {
+    openingPrinciples: {
+      label: "Opening Principles",
+      definition: "How a move affects development, the center, tempo, and king safety before the middlegame really starts.",
+      concepts: [
+        "control of the center",
+        "occupation of the center",
+        "pressure on the center",
+        "development",
+        "development lead",
+        "loss of tempo",
+        "gain of tempo",
+        "moving the same piece twice",
+        "premature queen development",
+        "castling",
+        "delayed castling",
+        "king safety in the opening",
+        "creating luft too early",
+        "flank pawn move in the opening",
+        "opening a line",
+        "closing the center",
+        "opening the center",
+        "central tension",
+        "pawn break",
+        "overextension",
+        "initiative in the opening",
+        "transition from opening to middlegame"
+      ]
+    },
+    tacticalMotifs: {
+      label: "Tactical Motifs",
+      definition: "Short forcing ideas that win material, create threats, or punish loose coordination immediately.",
+      concepts: [
+        "fork",
+        "double attack",
+        "pin",
+        "absolute pin",
+        "relative pin",
+        "skewer",
+        "discovered attack",
+        "discovered check",
+        "double check",
+        "deflection",
+        "decoy",
+        "interference",
+        "clearance",
+        "removal of the defender",
+        "overloading",
+        "x-ray attack",
+        "zwischenzug",
+        "desperado",
+        "attraction",
+        "trapping a piece",
+        "loose piece",
+        "hanging piece",
+        "underdefended piece",
+        "back-rank weakness",
+        "mating net",
+        "perpetual check",
+        "smothered mate",
+        "back-rank mate",
+        "Greek gift sacrifice",
+        "sacrifice for initiative",
+        "tactical shot",
+        "forcing sequence",
+        "checks captures threats scan",
+        "tactical oversight",
+        "missed tactic"
+      ]
+    },
+    strategicConcepts: {
+      label: "Strategic / Positional Concepts",
+      definition: "Longer-term ideas about space, piece quality, files, diagonals, squares, and overall coordination.",
+      concepts: [
+        "strong center",
+        "weak center",
+        "space advantage",
+        "cramped position",
+        "open file",
+        "half-open file",
+        "closed file",
+        "control of a file",
+        "seventh rank invasion",
+        "open diagonal",
+        "long diagonal pressure",
+        "weak square",
+        "hole",
+        "outpost",
+        "color complex",
+        "dark-square weakness",
+        "light-square weakness",
+        "bishop pair",
+        "bad bishop",
+        "good bishop",
+        "knight outpost",
+        "knight vs bishop imbalance",
+        "rook activity",
+        "queen activity",
+        "piece coordination",
+        "piece harmony",
+        "piece improvement",
+        "piece rerouting",
+        "piece activation",
+        "passive piece",
+        "active piece",
+        "domination",
+        "restriction",
+        "prophylaxis",
+        "overprotection",
+        "initiative",
+        "compensation",
+        "structural concession",
+        "static weakness",
+        "dynamic advantage",
+        "imbalance",
+        "transition into favorable structure"
+      ]
+    },
+    pawnStructureConcepts: {
+      label: "Pawn Structure Concepts",
+      definition: "How pawns shape long-term plans, create targets, and determine where the play belongs.",
+      concepts: [
+        "pawn chain",
+        "pawn lever",
+        "pawn break",
+        "passed pawn",
+        "protected passed pawn",
+        "outside passed pawn",
+        "connected passed pawns",
+        "isolated pawn",
+        "isolated queen pawn",
+        "backward pawn",
+        "doubled pawns",
+        "tripled pawns",
+        "hanging pawns",
+        "pawn island",
+        "minority attack",
+        "majority attack",
+        "fixed pawns",
+        "mobile pawns",
+        "weak pawn",
+        "strong pawn center",
+        "pawn storm",
+        "kingside pawn storm",
+        "queenside expansion",
+        "undermining a pawn chain",
+        "blockading a pawn",
+        "blockade square",
+        "creating a target",
+        "pawn weakness",
+        "overextended pawns",
+        "pawn shelter",
+        "pawn cover",
+        "destroying pawn shelter"
+      ]
+    },
+    kingSafetyConcepts: {
+      label: "King Safety Concepts",
+      definition: "Whether the king is secure, exposed, under pressure, or becoming the natural target of the position.",
+      concepts: [
+        "castled king safety",
+        "exposed king",
+        "uncastled king",
+        "shattered kingside",
+        "weakened dark squares around king",
+        "weakened light squares around king",
+        "open lines to king",
+        "file opened against king",
+        "diagonal opened against king",
+        "lack of defenders around king",
+        "attacking chances against king",
+        "overextended pawn shield",
+        "unsafe king walk",
+        "mating net formation",
+        "exchange sacrifice for attack",
+        "piece concentration near king"
+      ]
+    },
+    middlegamePlanningConcepts: {
+      label: "Middlegame Planning Concepts",
+      definition: "Plans about where to play, when to trade, how to build pressure, and how to handle tension and counterplay.",
+      concepts: [
+        "attack on king",
+        "attack on center",
+        "attack on flank",
+        "minority attack",
+        "central break",
+        "queenside play",
+        "kingside play",
+        "improving worst-placed piece",
+        "converting initiative",
+        "preventing counterplay",
+        "simplifying into favorable ending",
+        "avoiding simplification",
+        "maintaining tension",
+        "releasing tension too early",
+        "exchanging attacking piece",
+        "favorable trade",
+        "unfavorable trade",
+        "good trade",
+        "bad trade",
+        "strategic concession",
+        "fixing a weakness",
+        "creating a second weakness",
+        "target selection",
+        "plan consistency",
+        "plan mismatch",
+        "too slow for the position",
+        "automatic move that ignores position demands"
+      ]
+    },
+    endgameConcepts: {
+      label: "Endgame Concepts",
+      definition: "Technique, king activity, pawn races, rook activity, theoretical methods, and conversion mechanics once the pieces come off.",
+      concepts: [
+        "king activity",
+        "king centralization",
+        "opposition",
+        "distant opposition",
+        "triangulation",
+        "zugzwang",
+        "fortress",
+        "breakthrough",
+        "outside passed pawn",
+        "connected passed pawns",
+        "rook behind passed pawn",
+        "active rook",
+        "passive rook",
+        "rook on seventh rank",
+        "cutting off the king",
+        "converting extra pawn",
+        "converting material advantage",
+        "simplifying while ahead",
+        "trading pieces not pawns",
+        "wrong rook pawn",
+        "wrong bishop rook pawn ending",
+        "theoretical draw",
+        "Lucena-type bridge idea",
+        "Philidor-type defensive setup",
+        "rook activity over pawn grabbing",
+        "bishop of wrong color",
+        "knight blockade",
+        "drawing mechanism",
+        "winning mechanism"
+      ]
+    },
+    practicalPlayConcepts: {
+      label: "Time / Practical Play Concepts",
+      definition: "Decisions shaped by clock pressure, practical simplification, risk management, and the easiest way to play the position.",
+      concepts: [
+        "time pressure",
+        "blitz practical decision",
+        "safe simplification",
+        "risky complication",
+        "practical chances",
+        "avoiding opponent counterplay",
+        "choosing easier move over best move",
+        "playing too fast",
+        "playing too slowly",
+        "using forcing moves under time pressure",
+        "practical conversion",
+        "practical defense"
+      ]
+    }
+  };
+
+  const MOVE_PURPOSES = [
+    "develop a piece",
+    "improve a piece",
+    "defend a piece",
+    "defend a square",
+    "contest the center",
+    "occupy the center",
+    "gain space",
+    "create counterplay",
+    "attack king",
+    "attack structure",
+    "open a file",
+    "open a diagonal",
+    "create a passed pawn",
+    "fix a weakness",
+    "exploit a weakness",
+    "trade pieces",
+    "trade queens",
+    "simplify",
+    "increase tension",
+    "release tension",
+    "prepare a pawn break",
+    "execute a pawn break",
+    "improve king safety",
+    "stop a threat",
+    "prevent opponent plan",
+    "win material",
+    "start tactical sequence",
+    "convert advantage",
+    "hold a draw",
+    "activate king",
+    "activate rook",
+    "create an outpost",
+    "occupy an outpost",
+    "blockade a pawn"
+  ];
+
+  function oppositeColor(color) {
+    return color === "w" ? "b" : "w";
+  }
+
+  function capitalizeWord(value) {
+    if (!value) {
+      return "";
+    }
+
+    return `${value[0].toUpperCase()}${value.slice(1)}`;
+  }
+
+  function movePrefixText(move) {
+    const san = move.san || move.moveSan || move.bestSan || "move";
+    return `${move.color === "w" ? `${move.moveNumber}.` : `${move.moveNumber}...`} ${san}`;
+  }
+
+  function pieceValue(piece) {
+    if (!piece) {
+      return 0;
+    }
+
+    const type = typeof piece === "string" ? piece : piece.type;
+    return PIECE_VALUES[type] || 0;
+  }
+
+  function squareFileIndex(square) {
+    return square ? square.charCodeAt(0) - 97 : -1;
+  }
+
+  function squareRankIndex(square) {
+    return square ? Number(square[1]) : -1;
+  }
+
+  function isCenterSquare(square) {
+    return ["d4", "d5", "e4", "e5"].includes(square);
+  }
+
+  function isExtendedCenterSquare(square) {
+    return ["c3", "c4", "c5", "c6", "d3", "d4", "d5", "d6", "e3", "e4", "e5", "e6", "f3", "f4", "f5", "f6"].includes(square);
+  }
+
+  function withTurnInFen(fen, turn) {
+    const parts = String(fen || "").trim().split(/\s+/);
+    if (parts.length < 2) {
+      return fen;
+    }
+
+    parts[1] = turn;
+    return parts.join(" ");
+  }
+
+  function safePieceAtFen(fen, square) {
+    try {
+      return new Chess(fen).get(square);
+    } catch {
+      return null;
+    }
+  }
+
+  function collectPieces(fen, color, type = null) {
+    try {
+      const chess = new Chess(fen);
+      const board = chess.board();
+      const pieces = [];
+
+      board.forEach((rank, rankIndex) => {
+        rank.forEach((piece, fileIndex) => {
+          if (!piece || piece.color !== color || (type && piece.type !== type)) {
+            return;
+          }
+
+          pieces.push({
+            square: `${String.fromCharCode(97 + fileIndex)}${8 - rankIndex}`,
+            ...piece
+          });
+        });
+      });
+
+      return pieces;
+    } catch {
+      return [];
+    }
+  }
+
+  function attackerSquares(fen, square, color) {
+    try {
+      return new Chess(fen).attackers(square, color) || [];
+    } catch {
+      return [];
+    }
+  }
+
+  function findKingSquare(fen, color) {
+    return collectPieces(fen, color, "k")[0]?.square || null;
+  }
+
+  function isPieceOnStartingSquare(type, square, color) {
+    return STARTING_SQUARES[color]?.[type]?.includes(square) || false;
+  }
+
+  function countDevelopedMinorPieces(fen, color) {
+    return collectPieces(fen, color)
+      .filter((piece) => ["n", "b"].includes(piece.type))
+      .filter((piece) => !isPieceOnStartingSquare(piece.type, piece.square, color))
+      .length;
+  }
+
+  function countLoosePieces(fen, color) {
+    return collectPieces(fen, color)
+      .filter((piece) => piece.type !== "k")
+      .map((piece) => {
+        const attackers = attackerSquares(fen, piece.square, oppositeColor(color));
+        const defenders = attackerSquares(fen, piece.square, color);
+        return {
+          square: piece.square,
+          type: piece.type,
+          attackers: attackers.length,
+          defenders: defenders.length,
+          piece
+        };
+      })
+      .filter((entry) => entry.attackers > 0 && entry.defenders < entry.attackers);
+  }
+
+  function isLoosePieceAtSquare(fen, color, square) {
+    return countLoosePieces(fen, color).find((piece) => piece.square === square) || null;
+  }
+
+  function kingSafetySnapshot(fen, color) {
+    const kingSquare = findKingSquare(fen, color);
+    if (!kingSquare) {
+      return {
+        kingSquare: null,
+        castled: false,
+        attackers: 0,
+        legalEscapes: 0,
+        shieldMissing: 0,
+        danger: 0
+      };
+    }
+
+    const enemyColor = oppositeColor(color);
+    const enemyAttackers = attackerSquares(fen, kingSquare, enemyColor);
+    const castledSquares = color === "w" ? ["g1", "c1"] : ["g8", "c8"];
+    const castled = castledSquares.includes(kingSquare);
+    let shieldSquares = [];
+
+    if (kingSquare === "g1") shieldSquares = ["f2", "g2", "h2"];
+    if (kingSquare === "c1") shieldSquares = ["a2", "b2", "c2"];
+    if (kingSquare === "g8") shieldSquares = ["f7", "g7", "h7"];
+    if (kingSquare === "c8") shieldSquares = ["a7", "b7", "c7"];
+
+    const shieldMissing = shieldSquares.filter((square) => {
+      const piece = safePieceAtFen(fen, square);
+      return !piece || piece.color !== color || piece.type !== "p";
+    }).length;
+
+    let legalEscapes = 0;
+    try {
+      legalEscapes = new Chess(withTurnInFen(fen, color)).moves({ square: kingSquare, verbose: true }).length;
+    } catch {
+      legalEscapes = 0;
+    }
+
+    let danger = enemyAttackers.length * 2 + shieldMissing;
+    if (!castled && ["e1", "d1", "e8", "d8"].includes(kingSquare)) {
+      danger += 2;
+    }
+    if (legalEscapes === 0) {
+      danger += 1;
+    }
+
+    return {
+      kingSquare,
+      castled,
+      attackers: enemyAttackers.length,
+      legalEscapes,
+      shieldMissing,
+      danger
+    };
+  }
+
+  function hasBackRankWeakness(fen, color) {
+    const kingSquare = findKingSquare(fen, color);
+    if (!kingSquare) {
+      return false;
+    }
+
+    const backRank = color === "w" ? "1" : "8";
+    if (!kingSquare.endsWith(backRank)) {
+      return false;
+    }
+
+    const legalEscapes = (() => {
+      try {
+        return new Chess(withTurnInFen(fen, color)).moves({ square: kingSquare, verbose: true }).length;
+      } catch {
+        return 0;
+      }
+    })();
+
+    const heavyAttackers = attackerSquares(fen, kingSquare, oppositeColor(color))
+      .map((square) => safePieceAtFen(fen, square))
+      .filter((piece) => piece && ["r", "q"].includes(piece.type)).length;
+
+    return legalEscapes === 0 && heavyAttackers > 0;
+  }
+
+  function pawnStructureSnapshot(fen, color) {
+    const pawns = collectPieces(fen, color, "p");
+    const enemyPawns = collectPieces(fen, oppositeColor(color), "p");
+    const pawnsByFile = new Map();
+    const isolated = [];
+    const doubled = [];
+    const passed = [];
+
+    pawns.forEach((pawn) => {
+      const file = pawn.square[0];
+      if (!pawnsByFile.has(file)) {
+        pawnsByFile.set(file, []);
+      }
+      pawnsByFile.get(file).push(pawn.square);
+    });
+
+    pawns.forEach((pawn) => {
+      const fileIndex = squareFileIndex(pawn.square);
+      const leftFile = fileIndex > 0 ? String.fromCharCode(96 + fileIndex) : null;
+      const rightFile = fileIndex < 7 ? String.fromCharCode(98 + fileIndex) : null;
+      const hasNeighbor = Boolean((leftFile && pawnsByFile.get(leftFile)?.length) || (rightFile && pawnsByFile.get(rightFile)?.length));
+
+      if (!hasNeighbor) {
+        isolated.push(pawn.square);
+      }
+
+      if ((pawnsByFile.get(pawn.square[0]) || []).length > 1) {
+        doubled.push(pawn.square);
+      }
+
+      const pawnFile = squareFileIndex(pawn.square);
+      const pawnRank = squareRankIndex(pawn.square);
+      const enemyAhead = enemyPawns.some((enemyPawn) => {
+        const enemyFile = squareFileIndex(enemyPawn.square);
+        const enemyRank = squareRankIndex(enemyPawn.square);
+        if (Math.abs(enemyFile - pawnFile) > 1) {
+          return false;
+        }
+
+        return color === "w" ? enemyRank > pawnRank : enemyRank < pawnRank;
+      });
+
+      if (!enemyAhead) {
+        passed.push(pawn.square);
+      }
+    });
+
+    return {
+      pawns,
+      isolated,
+      doubled,
+      passed
+    };
+  }
+
+  function applyUciMoveToFen(fen, uci) {
+    if (!fen || !uci || uci.length < 4) {
+      return null;
+    }
+
+    try {
+      const chess = new Chess(fen);
+      const move = chess.move({
+        from: uci.slice(0, 2),
+        to: uci.slice(2, 4),
+        promotion: uci.slice(4) || "q"
+      });
+
+      if (!move) {
+        return null;
+      }
+
+      return {
+        chess,
+        move,
+        afterFen: chess.fen()
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function detectForkTargets(fen, color, square) {
+    if (!square) {
+      return [];
+    }
+
+    try {
+      const chess = new Chess(withTurnInFen(fen, color));
+      const moves = chess.moves({ square, verbose: true });
+      const targets = [];
+
+      moves.forEach((candidate) => {
+        const targetPiece = safePieceAtFen(fen, candidate.to);
+        if (!targetPiece || targetPiece.color !== oppositeColor(color)) {
+          return;
+        }
+
+        targets.push({
+          square: candidate.to,
+          type: targetPiece.type,
+          value: pieceValue(targetPiece)
+        });
+      });
+
+      const unique = new Map();
+      targets.forEach((target) => {
+        unique.set(target.square, target);
+      });
+
+      return [...unique.values()].filter((target) => target.value >= 3 || target.type === "k");
+    } catch {
+      return [];
+    }
+  }
+
+  function describeTargets(targets) {
+    if (!targets.length) {
+      return "multiple targets";
+    }
+
+    return targets
+      .slice(0, 3)
+      .map((target) => `${PIECE_NAMES[target.type] || "piece"} on ${target.square}`)
+      .join(" and ");
+  }
+
+  function inferCaptureInfo(move) {
+    try {
+      const chess = new Chess(move.beforeFen);
+      const played = chess.move({
+        from: move.from,
+        to: move.to,
+        promotion: move.uci?.slice(4) || "q"
+      });
+      return played || null;
+    } catch {
+      return null;
+    }
+  }
+
+  function severityFromCpl(cpl = 0) {
+    if (cpl >= 220) {
+      return "high";
+    }
+
+    if (cpl >= 120) {
+      return "medium";
+    }
+
+    return "low";
+  }
+
+  function extractMoveFeatures(move, allPlayerMoves = []) {
+    const movedPiece = safePieceAtFen(move.beforeFen, move.from);
+    const enemyColor = oppositeColor(move.color);
+    const beforeKing = kingSafetySnapshot(move.beforeFen, move.color);
+    const afterKing = kingSafetySnapshot(move.afterFen, move.color);
+    const beforeEnemyKing = kingSafetySnapshot(move.beforeFen, enemyColor);
+    const afterEnemyKing = kingSafetySnapshot(move.afterFen, enemyColor);
+    const beforePawns = pawnStructureSnapshot(move.beforeFen, move.color);
+    const afterPawns = pawnStructureSnapshot(move.afterFen, move.color);
+    const ownLooseBefore = countLoosePieces(move.beforeFen, move.color);
+    const ownLooseAfter = countLoosePieces(move.afterFen, move.color);
+    const enemyLooseBefore = countLoosePieces(move.beforeFen, enemyColor);
+    const movedPieceLooseAfter = isLoosePieceAtSquare(move.afterFen, move.color, move.to);
+    const bestMoveResult = applyUciMoveToFen(move.beforeFen, move.bestUci);
+    const playedForkTargets = detectForkTargets(move.afterFen, move.color, move.to);
+    const bestForkTargets = bestMoveResult ? detectForkTargets(bestMoveResult.afterFen, move.color, bestMoveResult.move.to) : [];
+    const captureInfo = inferCaptureInfo(move);
+    const createdIsolatedPawn = afterPawns.isolated.length > beforePawns.isolated.length;
+    const createdPassedPawn = afterPawns.passed.length > beforePawns.passed.length;
+    const improvedDevelopment = countDevelopedMinorPieces(move.afterFen, move.color) > countDevelopedMinorPieces(move.beforeFen, move.color);
+    const repeatedPieceInOpening = Boolean(
+      movedPiece &&
+      move.moveNumber <= 10 &&
+      ["n", "b", "q", "r"].includes(movedPiece.type) &&
+      !isPieceOnStartingSquare(movedPiece.type, move.from, move.color)
+    );
+    const earlyQueenOrRookMove = Boolean(
+      movedPiece &&
+      move.moveNumber <= 10 &&
+      ["q", "r"].includes(movedPiece.type)
+    );
+    const flankPawnMove = Boolean(
+      movedPiece &&
+      movedPiece.type === "p" &&
+      ["a", "b", "g", "h"].includes(move.to[0]) &&
+      move.moveNumber <= 10
+    );
+    const captureTradeDown = Boolean(
+      captureInfo?.captured &&
+      movedPiece &&
+      pieceValue(movedPiece) > pieceValue(captureInfo.captured) &&
+      move.cpl > 100
+    );
+    const lateMistakePattern = allPlayerMoves.filter((item) => item.moveNumber >= 20 && item.cpl > 100).length >= 2;
+    const featuresDetected = [];
+
+    if (movedPieceLooseAfter) featuresDetected.push("hanging_piece");
+    if (bestForkTargets.length >= 2) featuresDetected.push("fork_threat");
+    if (playedForkTargets.length >= 2) featuresDetected.push("double_attack");
+    if (afterKing.danger > beforeKing.danger + 1) featuresDetected.push("king_safety_drop");
+    if (hasBackRankWeakness(move.afterFen, move.color)) featuresDetected.push("back_rank_weakness");
+    if (createdIsolatedPawn) featuresDetected.push("isolated_pawn");
+    if (createdPassedPawn) featuresDetected.push("passed_pawn");
+    if (improvedDevelopment) featuresDetected.push("development_gain");
+    if (repeatedPieceInOpening || earlyQueenOrRookMove || flankPawnMove) featuresDetected.push("opening_principle_violation");
+    if (enemyLooseBefore.length) featuresDetected.push("enemy_loose_piece");
+    if (captureTradeDown) featuresDetected.push("bad_trade");
+
+    return {
+      movedPiece,
+      ownLooseBefore,
+      ownLooseAfter,
+      enemyLooseBefore,
+      movedPieceLooseAfter,
+      bestForkTargets,
+      playedForkTargets,
+      beforeKing,
+      afterKing,
+      beforeEnemyKing,
+      afterEnemyKing,
+      beforePawns,
+      afterPawns,
+      createdIsolatedPawn,
+      createdPassedPawn,
+      improvedDevelopment,
+      repeatedPieceInOpening,
+      earlyQueenOrRookMove,
+      flankPawnMove,
+      captureTradeDown,
+      lateMistakePattern,
+      captureInfo,
+      featuresDetected
+    };
+  }
+
+  function pushUnique(list, value) {
+    if (value && !list.includes(value)) {
+      list.push(value);
+    }
+  }
+
+  function joinNaturalLanguage(items) {
+    const filtered = (items || []).filter(Boolean);
+    if (!filtered.length) {
+      return "";
+    }
+    if (filtered.length === 1) {
+      return filtered[0];
+    }
+    if (filtered.length === 2) {
+      return `${filtered[0]} and ${filtered[1]}`;
+    }
+    return `${filtered.slice(0, -1).join(", ")}, and ${filtered.at(-1)}`;
+  }
+
+  function firstSentence(text) {
+    const value = String(text || "").trim();
+    if (!value) {
+      return "";
+    }
+
+    const match = value.match(/^.*?[.!?](?:\s|$)/);
+    return (match ? match[0] : value).trim();
+  }
+
+  function safeLabelText(move) {
+    return String(move?.label || "move").toLowerCase();
+  }
+
+  function summarizeMovePurposes(purposes) {
+    const list = [...new Set((purposes || []).filter(Boolean))];
+    if (!list.length) {
+      return "improved the position";
+    }
+
+    const hasCenter = list.includes("occupy the center") || list.includes("contest the center");
+    const hasDevelopment = list.includes("develop a piece");
+    const hasKingSafety = list.includes("improve king safety");
+    const hasSimplify = list.includes("simplify") || list.includes("trade queens") || list.includes("trade pieces");
+    const hasPassedPawn = list.includes("create a passed pawn");
+    const hasAttack = list.includes("attack king");
+    const hasOutpost = list.includes("occupy an outpost") || list.includes("create an outpost");
+    const hasKingActivity = list.includes("activate king");
+    const hasRookActivity = list.includes("activate rook");
+    const hasPawnBreak = list.includes("execute a pawn break") || list.includes("prepare a pawn break");
+    const hasThreat = list.includes("stop a threat");
+
+    if (hasDevelopment && hasCenter) {
+      return "developed and fought for the center";
+    }
+    if (hasKingSafety && hasDevelopment) {
+      return "developed and made king safety easier";
+    }
+    if (hasKingSafety) {
+      return "improved king safety";
+    }
+    if (hasCenter) {
+      return "fought for the center";
+    }
+    if (hasAttack) {
+      return "increased pressure on the king";
+    }
+    if (hasPawnBreak) {
+      return "challenged the pawn structure";
+    }
+    if (hasSimplify) {
+      return "simplified the position";
+    }
+    if (hasPassedPawn) {
+      return "created a passed pawn";
+    }
+    if (hasOutpost) {
+      return "claimed a strong outpost";
+    }
+    if (hasKingActivity) {
+      return "improved king activity";
+    }
+    if (hasRookActivity) {
+      return "improved rook activity";
+    }
+    if (hasThreat) {
+      return "met the main threat";
+    }
+
+    return list[0];
+  }
+
+  function buildCoachPanelCopy(move) {
+    const explanation = firstSentence(move.explanation || `${move.san || "Move"} was labeled ${safeLabelText(move)}.`);
+    const showAlternative = move.label === "Good" || move.label === "Inaccuracy";
+    const followup = showAlternative
+      ? firstSentence(move.alternative || move.whatChanged || "")
+      : move.moveNumber <= 10
+        ? ""
+        : firstSentence(move.advice || move.lesson || move.whatChanged || "");
+    const followupPrefix = showAlternative && /^better\b/i.test(followup || "")
+      ? ""
+      : showAlternative
+        ? "Better: "
+        : "Tip: ";
+
+    return [explanation, followup ? `${followupPrefix}${followup}` : ""].filter(Boolean).join(" ");
+  }
+
+  function sumMaterialForColor(fen, color) {
+    return collectPieces(fen, color)
+      .filter((piece) => piece.type !== "k")
+      .reduce((sum, piece) => sum + pieceValue(piece), 0);
+  }
+
+  function totalMaterialOnBoard(fen) {
+    return sumMaterialForColor(fen, "w") + sumMaterialForColor(fen, "b");
+  }
+
+  function materialBalanceForColor(fen, color) {
+    return sumMaterialForColor(fen, color) - sumMaterialForColor(fen, oppositeColor(color));
+  }
+
+  function centerSnapshot(fen, color) {
+    const coreSquares = ["d4", "d5", "e4", "e5"];
+    const extendedSquares = ["c3", "c4", "c5", "c6", "d3", "d4", "d5", "d6", "e3", "e4", "e5", "e6", "f3", "f4", "f5", "f6"];
+    const occupiedCore = coreSquares.filter((square) => safePieceAtFen(fen, square)?.color === color).length;
+    const occupiedExtended = extendedSquares.filter((square) => safePieceAtFen(fen, square)?.color === color).length;
+    const attackedCore = coreSquares.filter((square) => attackerSquares(fen, square, color).length > 0).length;
+    const attackedExtended = extendedSquares.filter((square) => attackerSquares(fen, square, color).length > 0).length;
+
+    return {
+      occupiedCore,
+      occupiedExtended,
+      attackedCore,
+      attackedExtended,
+      controlScore: occupiedCore * 2 + attackedCore + Math.max(0, occupiedExtended - occupiedCore)
+    };
+  }
+
+  function moveIsCastling(move) {
+    return /\bO-O(-O)?\b/.test(move.san || move.moveSan || "");
+  }
+
+  function moveIsCheck(move) {
+    return /[+#]/.test(move.san || move.moveSan || "");
+  }
+
+  function fileHasPawn(fen, file, color = null) {
+    return collectPieces(fen, color || "w", "p").concat(color ? [] : collectPieces(fen, "b", "p"))
+      .some((piece) => piece.square[0] === file);
+  }
+
+  function isOpenFile(fen, file) {
+    return !fileHasPawn(fen, file);
+  }
+
+  function isHalfOpenFile(fen, file, color) {
+    return !fileHasPawn(fen, file, color);
+  }
+
+  function detectPawnBreak(move, movedPiece) {
+    if (!movedPiece || movedPiece.type !== "p") {
+      return false;
+    }
+
+    const enemyPawns = collectPieces(move.beforeFen, oppositeColor(move.color), "p");
+    const toFile = squareFileIndex(move.to);
+    const toRank = squareRankIndex(move.to);
+    const directContact = enemyPawns.some((enemyPawn) => {
+      const enemyFile = squareFileIndex(enemyPawn.square);
+      const enemyRank = squareRankIndex(enemyPawn.square);
+      return Math.abs(enemyFile - toFile) === 1 && Math.abs(enemyRank - toRank) <= 1;
+    });
+
+    return ["c", "d", "e", "f"].includes(move.from[0]) && (directContact || isCenterSquare(move.to) || isExtendedCenterSquare(move.to));
+  }
+
+  function squaresControlledByPawn(square, color) {
+    if (!square) {
+      return [];
+    }
+
+    const file = squareFileIndex(square);
+    const rank = squareRankIndex(square);
+    const rankDelta = color === "w" ? 1 : -1;
+    const targets = [];
+
+    [[file - 1, rank + rankDelta], [file + 1, rank + rankDelta]].forEach(([targetFile, targetRank]) => {
+      if (targetFile < 0 || targetFile > 7 || targetRank < 1 || targetRank > 8) {
+        return;
+      }
+      targets.push(`${String.fromCharCode(97 + targetFile)}${targetRank}`);
+    });
+
+    return targets;
+  }
+
+  function pawnDefendersOfSquare(fen, color, square) {
+    return attackerSquares(fen, square, color)
+      .map((attackerSquare) => safePieceAtFen(fen, attackerSquare))
+      .filter((piece) => piece?.type === "p");
+  }
+
+  function kingZoneSquares(fen, color) {
+    const kingSquare = findKingSquare(fen, color);
+    if (!kingSquare) {
+      return [];
+    }
+
+    const file = squareFileIndex(kingSquare);
+    const rank = squareRankIndex(kingSquare);
+    const squares = [];
+
+    for (let fileOffset = -1; fileOffset <= 1; fileOffset += 1) {
+      for (let rankOffset = -1; rankOffset <= 1; rankOffset += 1) {
+        const targetFile = file + fileOffset;
+        const targetRank = rank + rankOffset;
+        if (targetFile < 0 || targetFile > 7 || targetRank < 1 || targetRank > 8) {
+          continue;
+        }
+        squares.push(`${String.fromCharCode(97 + targetFile)}${targetRank}`);
+      }
+    }
+
+    return squares;
+  }
+
+  function isCriticalWeakSquare(square, fen, weakSide) {
+    return isCenterSquare(square) || isExtendedCenterSquare(square) || kingZoneSquares(fen, weakSide).includes(square);
+  }
+
+  function detectWeakSquares(fen, side) {
+    const candidates = [...new Set([
+      "d4", "d5", "e4", "e5",
+      ...kingZoneSquares(fen, side)
+    ])].filter(Boolean);
+
+    return candidates.filter((square) => pawnDefendersOfSquare(fen, side, square).length === 0);
+  }
+
+  function knightCanOccupySquareSoon(fen, color, square) {
+    return collectPieces(fen, color, "n").some((piece) => {
+      const fileDelta = Math.abs(squareFileIndex(piece.square) - squareFileIndex(square));
+      const rankDelta = Math.abs(squareRankIndex(piece.square) - squareRankIndex(square));
+      return (fileDelta === 1 && rankDelta === 2) || (fileDelta === 2 && rankDelta === 1);
+    });
+  }
+
+  function detectOutpost(square, fen, weakSide) {
+    if (!square) {
+      return null;
+    }
+
+    const occupyingSide = oppositeColor(weakSide);
+    const rank = squareRankIndex(square);
+    const inEnemyTerritory = occupyingSide === "w" ? rank >= 5 : rank <= 4;
+    if (!inEnemyTerritory) {
+      return null;
+    }
+
+    if (pawnDefendersOfSquare(fen, weakSide, square).length > 0) {
+      return null;
+    }
+
+    if (!knightCanOccupySquareSoon(fen, occupyingSide, square)) {
+      return null;
+    }
+
+    return {
+      square,
+      type: "outpost",
+      strength: isCenterSquare(square) || kingZoneSquares(fen, weakSide).includes(square) ? "high" : "medium"
+    };
+  }
+
+  function detectPawnWeakening(move, beforeFen, afterFen) {
+    const movedPiece = safePieceAtFen(beforeFen, move.from);
+    if (!movedPiece || movedPiece.type !== "p") {
+      return {
+        lostControlSquares: [],
+        weakSquares: [],
+        criticalWeakSquares: [],
+        outposts: [],
+        primaryWeakSquare: null,
+        primaryOutpost: null
+      };
+    }
+
+    const beforeControl = squaresControlledByPawn(move.from, move.color);
+    const afterControl = squaresControlledByPawn(move.to, move.color);
+    const lostControlSquares = beforeControl.filter((square) => !afterControl.includes(square));
+    const weakSquares = lostControlSquares.filter((square) => pawnDefendersOfSquare(afterFen, move.color, square).length === 0);
+    const criticalWeakSquares = weakSquares.filter((square) => isCriticalWeakSquare(square, afterFen, move.color));
+    const outposts = criticalWeakSquares
+      .map((square) => detectOutpost(square, afterFen, move.color))
+      .filter(Boolean)
+      .sort((a, b) => (a.strength === "high" ? -1 : 1) - (b.strength === "high" ? -1 : 1));
+
+    return {
+      lostControlSquares,
+      weakSquares,
+      criticalWeakSquares,
+      outposts,
+      primaryWeakSquare: criticalWeakSquares[0] || weakSquares[0] || null,
+      primaryOutpost: outposts[0] || null
+    };
+  }
+
+  function detectOutpostOccupation(fen, color, square, pieceType) {
+    if (!square || !["n", "b"].includes(pieceType)) {
+      return false;
+    }
+
+    const rank = squareRankIndex(square);
+    const advanced = color === "w" ? rank >= 5 : rank <= 4;
+    if (!advanced) {
+      return false;
+    }
+
+    const defenders = attackerSquares(fen, square, color)
+      .map((attackerSquare) => safePieceAtFen(fen, attackerSquare))
+      .filter((piece) => piece?.type === "p");
+    const enemyPawnPressure = attackerSquares(fen, square, oppositeColor(color))
+      .map((attackerSquare) => safePieceAtFen(fen, attackerSquare))
+      .filter((piece) => piece?.type === "p");
+
+    return defenders.length > 0 && enemyPawnPressure.length === 0;
+  }
+
+  function detectRookActivation(fen, color, square) {
+    if (!square) {
+      return false;
+    }
+
+    const file = square[0];
+    const rank = squareRankIndex(square);
+    return isOpenFile(fen, file) || isHalfOpenFile(fen, file, color) || (color === "w" ? rank >= 7 : rank <= 2);
+  }
+
+  function analyzeImmediatePunish(fen, color, square) {
+    if (!square) {
+      return null;
+    }
+
+    const targetPiece = safePieceAtFen(fen, square);
+    if (!targetPiece || targetPiece.color !== color || targetPiece.type === "k") {
+      return null;
+    }
+
+    const enemyColor = oppositeColor(color);
+    const attackerSquaresList = attackerSquares(fen, square, enemyColor);
+    if (!attackerSquaresList.length) {
+      return null;
+    }
+
+    const defenderSquaresList = attackerSquares(fen, square, color);
+    const attackers = attackerSquaresList
+      .map((attackerSquare) => ({
+        square: attackerSquare,
+        piece: safePieceAtFen(fen, attackerSquare)
+      }))
+      .filter((entry) => entry.piece);
+
+    if (!attackers.length) {
+      return null;
+    }
+
+    const cheapestAttacker = attackers.reduce((best, entry) => {
+      if (!best) {
+        return entry;
+      }
+      return pieceValue(entry.piece) < pieceValue(best.piece) ? entry : best;
+    }, null);
+
+    const targetValue = pieceValue(targetPiece);
+    const attackerValue = pieceValue(cheapestAttacker.piece);
+    const winningCapture = targetValue - attackerValue >= 2;
+    const insufficientDefense = defenderSquaresList.length < attackerSquaresList.length;
+
+    return {
+      targetSquare: square,
+      targetPiece,
+      targetPieceName: PIECE_NAMES[targetPiece.type] || "piece",
+      targetValue,
+      attackers,
+      defenders: defenderSquaresList.length,
+      attackerCount: attackerSquaresList.length,
+      cheapestAttackerSquare: cheapestAttacker.square,
+      cheapestAttackerPiece: cheapestAttacker.piece,
+      cheapestAttackerName: PIECE_NAMES[cheapestAttacker.piece.type] || "piece",
+      cheapestAttackerValue: attackerValue,
+      winningCapture,
+      insufficientDefense,
+      isHanging: insufficientDefense || winningCapture
+    };
+  }
+
+  function detectProphylacticPawnIdea(move, movedPiece) {
+    if (!movedPiece || movedPiece.type !== "p") {
+      return null;
+    }
+
+    if (move.from === "h7" && move.to === "h6") return "stopped Bg5 ideas and gave the king luft";
+    if (move.from === "h2" && move.to === "h3") return "stopped ...Bg4 ideas and gave the king luft";
+    if (move.from === "a7" && move.to === "a6") return "stopped Bb5 ideas and prepared queenside space";
+    if (move.from === "a2" && move.to === "a3") return "stopped ...Bb4 ideas and prepared queenside space";
+    if (move.from === "g7" && move.to === "g6") return "prepared a kingside fianchetto";
+    if (move.from === "g2" && move.to === "g3") return "prepared a kingside fianchetto";
+    if (move.from === "b7" && move.to === "b6") return "prepared a queenside fianchetto";
+    if (move.from === "b2" && move.to === "b3") return "prepared a queenside fianchetto";
+
+    return null;
+  }
+
+  function blocksHomeBishop(beforeFen, color, from, to, pieceType) {
+    if (pieceType !== "n") {
+      return false;
+    }
+
+    if (color === "w" && to === "d2") {
+      return safePieceAtFen(beforeFen, "c1")?.type === "b";
+    }
+    if (color === "w" && to === "e2") {
+      return safePieceAtFen(beforeFen, "f1")?.type === "b";
+    }
+    if (color === "b" && to === "d7") {
+      return safePieceAtFen(beforeFen, "c8")?.type === "b";
+    }
+    if (color === "b" && to === "e7") {
+      return safePieceAtFen(beforeFen, "f8")?.type === "b";
+    }
+
+    return false;
+  }
+
+  function extractBoardFeatures(move, allPlayerMoves = [], includeBestComparison = true) {
+    const base = extractMoveFeatures(move, allPlayerMoves);
+    const movedPiece = base.movedPiece || safePieceAtFen(move.beforeFen, move.from);
+    const phase = phaseForMove(move.moveNumber);
+    const isEndgame = phase === "endgame" || totalMaterialOnBoard(move.beforeFen) <= 16;
+    const beforeMaterial = materialBalanceForColor(move.beforeFen, move.color);
+    const afterMaterial = materialBalanceForColor(move.afterFen, move.color);
+    const beforeCenter = centerSnapshot(move.beforeFen, move.color);
+    const afterCenter = centerSnapshot(move.afterFen, move.color);
+    const enemyBeforeCenter = centerSnapshot(move.beforeFen, oppositeColor(move.color));
+    const enemyAfterCenter = centerSnapshot(move.afterFen, oppositeColor(move.color));
+    const beforeDevelopment = countDevelopedMinorPieces(move.beforeFen, move.color);
+    const afterDevelopment = countDevelopedMinorPieces(move.afterFen, move.color);
+    const isCastling = moveIsCastling(move);
+    const isCapture = (move.san || "").includes("x");
+    const isCheck = moveIsCheck(move);
+    const isPawnBreak = detectPawnBreak(move, movedPiece);
+    const pawnWeakening = detectPawnWeakening(move, move.beforeFen, move.afterFen);
+    const occupiesOutpost = detectOutpostOccupation(move.afterFen, move.color, move.to, movedPiece?.type);
+    const rookActivation = movedPiece?.type === "r" && detectRookActivation(move.afterFen, move.color, move.to);
+    const activatedKing = Boolean(isEndgame && movedPiece?.type === "k" && isExtendedCenterSquare(move.to));
+    const simplified = totalMaterialOnBoard(move.afterFen) < totalMaterialOnBoard(move.beforeFen);
+    const improvedKingSafety =
+      isCastling ||
+      (movedPiece?.type === "k" && base.afterKing.danger < base.beforeKing.danger) ||
+      (isKingPawnMove(move, move.color) && base.afterKing.danger < base.beforeKing.danger);
+    const pressuredEnemyKing = base.afterEnemyKing.danger > base.beforeEnemyKing.danger;
+    const centralOccupationGain = afterCenter.occupiedCore - beforeCenter.occupiedCore;
+    const centralControlGain = afterCenter.controlScore - beforeCenter.controlScore;
+    const enemyCentralGain = enemyAfterCenter.controlScore - enemyBeforeCenter.controlScore;
+    const gainsSpace = afterCenter.occupiedExtended > beforeCenter.occupiedExtended;
+    const addressesThreat = base.ownLooseAfter.length < base.ownLooseBefore.length || base.afterKing.danger < base.beforeKing.danger;
+    const wasAhead = beforeMaterial >= 1.5;
+    const wasBehind = beforeMaterial <= -1.5;
+    const tradeQueens = Boolean(base.captureInfo?.captured?.type === "q" && movedPiece?.type === "q");
+    const winsMaterial = afterMaterial > beforeMaterial + 0.5;
+    const losesMaterial = afterMaterial < beforeMaterial - 0.5;
+    const opensDiagonal = Boolean(
+      movedPiece?.type === "p" &&
+      ["c", "d", "e", "f"].includes(move.from[0]) &&
+      (move.from[0] !== move.to[0] || movedPiece.type === "p")
+    );
+    const openingSlowMove = Boolean(
+      phase === "opening" &&
+      !base.improvedDevelopment &&
+      !improvedKingSafety &&
+      centralOccupationGain <= 0 &&
+      centralControlGain <= 0 &&
+      (base.flankPawnMove || base.repeatedPieceInOpening || base.earlyQueenOrRookMove)
+    );
+    const prophylacticPawnIdea = detectProphylacticPawnIdea(move, movedPiece);
+    const blockedOwnBishop = blocksHomeBishop(move.beforeFen, move.color, move.from, move.to, movedPiece?.type);
+    const immediatePunish = analyzeImmediatePunish(move.afterFen, move.color, move.to);
+    const bestMoveImprovesDevelopmentMore = Boolean(
+      move.bestUci &&
+      (() => {
+        const bestMoveResult = applyUciMoveToFen(move.beforeFen, move.bestUci);
+        if (!bestMoveResult) {
+          return false;
+        }
+        const bestAfterDev = countDevelopedMinorPieces(bestMoveResult.afterFen, move.color);
+        return bestAfterDev > afterDevelopment;
+      })()
+    );
+
+    const features = {
+      ...base,
+      phase,
+      isEndgame,
+      movedPiece,
+      movedPieceName: movedPiece ? PIECE_NAMES[movedPiece.type] || "piece" : "piece",
+      beforeMaterial,
+      afterMaterial,
+      beforeCenter,
+      afterCenter,
+      enemyBeforeCenter,
+      enemyAfterCenter,
+      beforeDevelopment,
+      afterDevelopment,
+      isCastling,
+      isCapture,
+      isCheck,
+      isPawnBreak,
+      pawnWeakening,
+      createdWeakSquare: Boolean(pawnWeakening.primaryWeakSquare),
+      createdCriticalWeakSquare: Boolean(pawnWeakening.criticalWeakSquares.length),
+      createdOpponentOutpost: Boolean(pawnWeakening.primaryOutpost),
+      occupiesOutpost,
+      rookActivation,
+      activatedKing,
+      simplified,
+      improvedKingSafety,
+      pressuredEnemyKing,
+      centralOccupationGain,
+      centralControlGain,
+      enemyCentralGain,
+      gainsSpace,
+      addressesThreat,
+      wasAhead,
+      wasBehind,
+      tradeQueens,
+      winsMaterial,
+      losesMaterial,
+      opensDiagonal,
+      openingSlowMove,
+      prophylacticPawnIdea,
+      blockedOwnBishop,
+      immediatePunish,
+      bestMoveImprovesDevelopmentMore,
+      bestMoveFeatures: null
+    };
+
+    if (includeBestComparison && move.bestUci) {
+      const bestResult = applyUciMoveToFen(move.beforeFen, move.bestUci);
+      if (bestResult) {
+        const bestMoveLike = {
+          ...move,
+          san: bestResult.move.san,
+          from: bestResult.move.from,
+          to: bestResult.move.to,
+          uci: move.bestUci,
+          afterFen: bestResult.afterFen
+        };
+        features.bestMoveFeatures = extractBoardFeatures(bestMoveLike, allPlayerMoves, false);
+      }
+    }
+
+    return features;
+  }
+
+  function classifyMovePurpose(features) {
+    const purposes = [];
+
+    if (features.improvedDevelopment) pushUnique(purposes, "develop a piece");
+    if (features.beforeKing.danger > features.afterKing.danger || features.isCastling) pushUnique(purposes, "improve king safety");
+    if (features.centralOccupationGain > 0) pushUnique(purposes, "occupy the center");
+    if (features.centralControlGain > 0) pushUnique(purposes, "contest the center");
+    if (features.gainsSpace) pushUnique(purposes, "gain space");
+    if (features.addressesThreat) pushUnique(purposes, "stop a threat");
+    if (features.isPawnBreak) pushUnique(purposes, "execute a pawn break");
+    if (features.opensDiagonal) pushUnique(purposes, "open a diagonal");
+    if (features.pressuredEnemyKing) pushUnique(purposes, "attack king");
+    if (features.winsMaterial) pushUnique(purposes, "win material");
+    if (features.tradeQueens) pushUnique(purposes, "trade queens");
+    if (features.simplified) pushUnique(purposes, "simplify");
+    if (features.wasAhead && features.simplified) pushUnique(purposes, "convert advantage");
+    if (features.createdPassedPawn) pushUnique(purposes, "create a passed pawn");
+    if (features.occupiesOutpost) pushUnique(purposes, "occupy an outpost");
+    if (features.activatedKing) pushUnique(purposes, "activate king");
+    if (features.rookActivation) pushUnique(purposes, "activate rook");
+    if (features.captureTradeDown) pushUnique(purposes, "trade pieces");
+
+    if (!purposes.length) {
+      pushUnique(purposes, features.movedPiece?.type === "p" ? "gain space" : "improve a piece");
+    }
+
+    return purposes.slice(0, 3);
+  }
+
+  function detectConcepts(move, features) {
+    const isPositive = ["Best", "Excellent", "Good"].includes(move.label);
+    const concepts = [];
+    let category = isPositive ? "piece_improvement" : "missed_threat";
+
+    if (isPositive) {
+      if (features.improvedDevelopment) pushUnique(concepts, "development");
+      if (features.centralOccupationGain > 0) pushUnique(concepts, "occupation of the center");
+      if (features.centralControlGain > 0) pushUnique(concepts, "control of the center");
+      if (features.gainsSpace) pushUnique(concepts, "space advantage");
+      if (features.isCastling) pushUnique(concepts, "castling");
+      if (features.improvedKingSafety) pushUnique(concepts, "castled king safety");
+      if (features.isPawnBreak) pushUnique(concepts, features.phase === "opening" ? "pawn break" : "central break");
+      if (features.opensDiagonal) pushUnique(concepts, "open diagonal");
+      if (features.occupiesOutpost) pushUnique(concepts, "outpost");
+      if (features.rookActivation) pushUnique(concepts, "rook activity");
+      if (features.activatedKing) pushUnique(concepts, "king activity");
+      if (features.simplified && features.wasAhead) pushUnique(concepts, "safe simplification");
+      if (features.simplified && features.wasAhead) pushUnique(concepts, "converting material advantage");
+      if (features.pressuredEnemyKing) pushUnique(concepts, "attacking chances against king");
+      if (features.playedForkTargets.length >= 2 || features.winsMaterial) pushUnique(concepts, "tactical shot");
+      if (features.prophylacticPawnIdea) pushUnique(concepts, "prophylaxis");
+    } else {
+      if (features.createdCriticalWeakSquare) {
+        pushUnique(concepts, "weak square");
+        pushUnique(concepts, "pawn weakness");
+      }
+      if (features.createdOpponentOutpost) {
+        pushUnique(concepts, "outpost");
+        pushUnique(concepts, "knight outpost");
+      }
+      if (features.immediatePunish?.isHanging || features.movedPieceLooseAfter) {
+        pushUnique(concepts, "hanging piece");
+        pushUnique(concepts, "underdefended piece");
+      }
+      if (features.bestForkTargets.length >= 2 && features.playedForkTargets.length < 2) {
+        pushUnique(concepts, "missed tactic");
+        pushUnique(concepts, "fork");
+      }
+      if (features.afterKing.danger > features.beforeKing.danger + 1) {
+        pushUnique(concepts, "exposed king");
+        pushUnique(concepts, "open lines to king");
+      }
+      if (features.captureTradeDown) pushUnique(concepts, "bad trade");
+      if (features.openingSlowMove) {
+        pushUnique(concepts, "too slow for the position");
+        pushUnique(concepts, "opening principle violation");
+        if (features.flankPawnMove) pushUnique(concepts, "flank pawn move in the opening");
+        if (features.earlyQueenOrRookMove) pushUnique(concepts, "premature queen development");
+        if (features.repeatedPieceInOpening) pushUnique(concepts, "moving the same piece twice");
+      }
+      if (features.blockedOwnBishop) pushUnique(concepts, "blocked development");
+    }
+
+    if (!isPositive) {
+      if (features.immediatePunish?.isHanging || features.movedPieceLooseAfter) {
+        category = "hung_piece";
+      } else if (features.bestForkTargets.length >= 2 && features.playedForkTargets.length < 2) {
+        category = "missed_tactic";
+      } else if (features.afterKing.danger > features.beforeKing.danger + 1 || isKingPawnMove(move, move.color)) {
+        category = "king_safety_mistake";
+      } else if (features.captureTradeDown) {
+        category = "bad_trade";
+      } else if (features.createdCriticalWeakSquare || features.createdOpponentOutpost) {
+        category = "structural_weakening";
+      } else if (features.openingSlowMove) {
+        category = "slow_opening_move";
+      } else if (features.blockedOwnBishop || (features.improvedDevelopment && features.bestMoveImprovesDevelopmentMore)) {
+        category = "passive_development";
+      } else if (features.wasAhead && features.losesMaterial) {
+        category = "failed_conversion";
+      } else if (features.isEndgame && features.movedPiece?.type !== "k" && !features.activatedKing && features.label !== "Inaccuracy") {
+        category = "poor_endgame_decision";
+      }
+    } else if (features.bestForkTargets.length >= 2 || features.playedForkTargets.length >= 2 || features.winsMaterial) {
+      category = "tactical_awareness";
+    } else if (features.prophylacticPawnIdea) {
+      category = "prophylaxis";
+    } else if (features.isCastling || features.improvedDevelopment) {
+      category = "development";
+    } else if (features.isPawnBreak || features.centralControlGain > 0 || features.centralOccupationGain > 0) {
+      category = "center_play";
+    } else if (features.occupiesOutpost) {
+      category = "outpost_creation";
+    } else if (features.wasAhead && features.simplified) {
+      category = "good_conversion";
+    } else if (features.activatedKing) {
+      category = "endgame_king_activity";
+    }
+
+    return {
+      category,
+      mainConcepts: (concepts.length ? concepts : [isPositive ? "piece improvement" : "missed threat"]).slice(0, 4)
+    };
+  }
+
+  function describeBestMoveIdea(bestFeatures, bestMoveSan) {
+    if (!bestFeatures) {
+      return bestMoveSan || "the engine move";
+    }
+
+    const ideas = classifyMovePurpose(bestFeatures);
+    if (!ideas.length) {
+      return bestMoveSan || "the engine move";
+    }
+
+    return `${bestMoveSan || "the engine move"} was stronger because it ${joinNaturalLanguage(ideas)}`;
+  }
+
+  function buildBestMoveSuggestion(bestFeatures, bestMoveSan) {
+    if (!bestMoveSan) {
+      return "";
+    }
+
+    const summary = summarizeMovePurposes(classifyMovePurpose(bestFeatures || {}));
+    if (!summary || summary === "improved the position") {
+      return `Better was ${bestMoveSan} because it handled the position more directly.`;
+    }
+
+    return `Better was ${bestMoveSan} because it ${summary}.`;
+  }
+
+  function buildStructuralBestMoveSuggestion(move, features) {
+    const bestMoveSan = move.bestSan || move.bestUci || "";
+    if (!bestMoveSan) {
+      return "";
+    }
+
+    const weakSquare = features.pawnWeakening.primaryOutpost?.square || features.pawnWeakening.primaryWeakSquare;
+    if (!features.bestMoveFeatures) {
+      return `Better was ${bestMoveSan} because it handled the position without conceding ${weakSquare || "a long-term square"}.`;
+    }
+
+    const summary = summarizeMovePurposes(classifyMovePurpose(features.bestMoveFeatures || {}));
+    if (!weakSquare) {
+      return `Better was ${bestMoveSan} because it ${summary}.`;
+    }
+
+    return `Better was ${bestMoveSan} because it ${summary} without conceding ${weakSquare}.`;
+  }
+
+  function evaluateMoveConsequences(move, features, conceptData) {
+    const piece = features.movedPieceName;
+    const bestIdea = describeBestMoveIdea(features.bestMoveFeatures, move.bestSan || move.bestUci || "the engine move");
+
+    switch (conceptData.category) {
+      case "hung_piece":
+        if (features.immediatePunish?.isHanging) {
+          return {
+            whatChanged: `After ${move.san}, your ${features.immediatePunish.targetPieceName} on ${features.immediatePunish.targetSquare} could be taken by ${features.immediatePunish.cheapestAttackerName === "pawn" ? "a pawn" : `the ${features.immediatePunish.cheapestAttackerName}`} from ${features.immediatePunish.cheapestAttackerSquare}.`,
+            lesson: "If a more valuable piece can be captured immediately by a cheaper one, that usually decides the position on the spot.",
+            advice: `Before every capture, check what attacks ${move.to} after your piece lands there.`
+          };
+        }
+        return {
+          whatChanged: `After ${move.san}, your ${piece} on ${move.to} was defended fewer times than it could be attacked, so it became an immediate tactical target.`,
+          lesson: "Loose pieces and underdefended pieces are often the first thing tactics punish.",
+          advice: "Before you play an active move, count attackers and defenders on the piece you move and on the pieces it stops protecting."
+        };
+      case "missed_tactic":
+        return {
+          whatChanged: `The position contained a forcing idea, but your move let it pass. ${bestIdea}.`,
+          lesson: "When the position is sharp, tactics matter more than quiet improvements.",
+          advice: "Use a short checks, captures, and threats scan before every move in tactical positions."
+        };
+      case "king_safety_mistake":
+        return {
+          whatChanged: `Your move made the king easier to attack by increasing open lines or reducing the pawn cover in front of it.`,
+          lesson: "King safety is a positional concept first and a tactical problem right after.",
+          advice: "Avoid pawn moves around your king unless they solve a direct threat or create concrete counterplay."
+        };
+      case "bad_trade":
+        return {
+          whatChanged: `The exchange simplified into a position where your structure, activity, or minor-piece balance was worse.`,
+          lesson: "A trade is only good if the position after the trade still favors your pieces and pawns.",
+          advice: "Before exchanging, picture the position one move later and ask which side benefits from the simpler structure."
+        };
+      case "structural_weakening": {
+        const weakSquare = features.pawnWeakening.primaryWeakSquare;
+        const outpost = features.pawnWeakening.primaryOutpost;
+        const bestAvoidsWeakness = features.bestMoveFeatures && !features.bestMoveFeatures.createdCriticalWeakSquare && !features.bestMoveFeatures.createdOpponentOutpost;
+        return {
+          whatChanged: outpost
+            ? `The pawn move gave up control of ${outpost.square}, which can become a ${outpost.strength === "high" ? "very strong" : "useful"} outpost for an enemy knight.`
+            : `The pawn move gave up control of ${weakSquare}, and that square is now much harder for your pawns to challenge.`,
+          lesson: "An active pawn push can still be strategically wrong if it gives the opponent a long-term square to use.",
+          advice: bestAvoidsWeakness && move.bestSan
+            ? `${move.bestSan} was better because it handled the position without conceding that square.`
+            : "Before a pawn push, ask which squares that pawn used to control and whether one of them becomes a lasting hole."
+        };
+      }
+      case "slow_opening_move":
+        return {
+          whatChanged: `The move spent a tempo without helping development, the center, or king safety, so the opponent kept the initiative.`,
+          lesson: "Opening moves need to solve opening problems: develop, fight for the center, or secure the king.",
+          advice: "In the first 8 to 10 moves, be suspicious of flank pawn moves and repeated piece moves unless they answer a concrete threat."
+        };
+      case "failed_conversion":
+        return {
+          whatChanged: `You were already better, but the move kept too much counterplay on the board instead of making the position easier to handle.`,
+          lesson: "When you are ahead, simplicity and safety are often stronger than one more ambitious try.",
+          advice: "When better, look first for trades, king safety, and ways to reduce the opponent's active ideas."
+        };
+      case "poor_endgame_decision":
+        return {
+          whatChanged: `In an endgame, your move did not improve king activity or the pawn structure, so the other side kept the important practical chances.`,
+          lesson: "Endgames reward activity more than passivity, especially from the king and rook.",
+          advice: "When pieces are reduced, ask first whether your king or rook can become more active."
+        };
+      case "tactical_awareness":
+        return {
+          whatChanged: `Your move created a concrete threat and forced the opponent to react instead of improving their own position.`,
+          lesson: "Good tactics come from noticing loose pieces, overloaded defenders, and forcing replies.",
+          advice: "Keep checking whether one move can attack two targets or win material by force."
+        };
+      case "development":
+        return {
+          whatChanged: `The move improved piece coordination and made the next useful move, such as castling or central play, easier to achieve.`,
+          lesson: "Good opening moves do more than one job: they develop, coordinate, and prepare the next step.",
+          advice: "Favor moves that improve a piece while also supporting the center or king safety."
+        };
+      case "prophylaxis":
+        return {
+          whatChanged: `The move prevented a useful idea for the opponent while keeping your position healthy.`,
+          lesson: "Small prophylactic moves are good when they stop something concrete.",
+          advice: "Use a waiting move only when you can name the threat or idea it prevents."
+        };
+      case "center_play":
+        return {
+          whatChanged: `The move changed the central battle immediately by adding pressure, occupying key squares, or challenging the pawn structure.`,
+          lesson: "Control of the center usually decides which side gets to choose the middlegame plan.",
+          advice: "When the center is still fluid, prioritize moves that claim space or challenge central pawns directly."
+        };
+      case "outpost_creation":
+        return {
+          whatChanged: `You placed a piece on a square that is hard to chase away and easy for your own pawns to support.`,
+          lesson: "A stable outpost turns one active piece into a long-term positional advantage.",
+          advice: "Look for advanced squares that enemy pawns cannot challenge and that your pawns can support."
+        };
+      case "good_conversion":
+        return {
+          whatChanged: `The move reduced counterplay and made your advantage easier to handle in practical terms.`,
+          lesson: "Conversion is not about finding the flashiest move; it is about removing the opponent's best chances.",
+          advice: "When you are better, prefer clean simplification and active pieces over extra complications."
+        };
+      case "endgame_king_activity":
+        return {
+          whatChanged: `Your king stepped toward the center, where it can support pawns and restrict the opponent's king.`,
+          lesson: "In endgames, the king becomes a fighting piece, not just something to hide.",
+          advice: "Once the queens and most pieces are gone, improve the king before chasing side pawn moves."
+        };
+      case "passive_development":
+        return {
+          whatChanged: `The move developed a piece, but it landed on a passive square or got in the way of better coordination.`,
+          lesson: "Development only helps when the new square improves activity and fits the rest of your position.",
+          advice: "When developing, ask whether the square increases activity, keeps lines open, and supports the center."
+        };
+      default:
+        return {
+          whatChanged: `${bestIdea}. Your move did not match the most urgent feature of the position as well.`,
+          lesson: "The right move is usually the one that addresses the position's biggest demand first.",
+          advice: "Before moving, ask what matters most right now: center, king safety, tactics, or simplification."
+        };
+    }
+  }
+
+  function generateCoachExplanation(move, allPlayerMoves = []) {
+    const features = extractBoardFeatures(move, allPlayerMoves);
+    const movePurpose = classifyMovePurpose(features);
+    const conceptData = detectConcepts(move, features);
+    const consequences = evaluateMoveConsequences(move, features, conceptData);
+    const isPositive = ["Best", "Excellent", "Good"].includes(move.label);
+    const played = move.san || move.moveSan || "your move";
+    const labelText = (move.label || "move").toLowerCase();
+    const movePurposeText = summarizeMovePurposes(movePurpose);
+    const conceptText = joinNaturalLanguage(conceptData.mainConcepts.slice(0, 3));
+    const bestIdea = describeBestMoveIdea(features.bestMoveFeatures, move.bestSan || move.bestUci || "the engine move");
+    const bestSuggestion = conceptData.category === "structural_weakening"
+      ? buildStructuralBestMoveSuggestion(move, features)
+      : buildBestMoveSuggestion(features.bestMoveFeatures, move.bestSan || move.bestUci || "");
+
+    let explanation = `${played} was labeled ${labelText}.`;
+
+    switch (conceptData.category) {
+      case "development":
+        explanation = `${played} was ${labelText} because it ${movePurposeText}. It improved coordination without wasting time.`;
+        break;
+      case "prophylaxis":
+        explanation = `${played} was ${labelText} because it ${features.prophylacticPawnIdea || "made a useful prophylactic move"}.`;
+        break;
+      case "center_play":
+        explanation = `${played} was ${labelText} because it ${movePurposeText}. It changed the central fight right away.`;
+        break;
+      case "tactical_awareness":
+        explanation = `${played} was ${labelText} because it noticed ${conceptText || "a tactical detail"} and turned it into a forcing move.`;
+        break;
+      case "outpost_creation":
+        explanation = `${played} was ${labelText} because it ${movePurposeText}. That square is hard for the opponent to challenge.`;
+        break;
+      case "good_conversion":
+        explanation = `${played} was ${labelText} because it ${movePurposeText} and reduced counterplay.`;
+        break;
+      case "endgame_king_activity":
+        explanation = `${played} was ${labelText} because it ${movePurposeText}. In the endgame, an active king is a real piece.`;
+        break;
+      case "hung_piece":
+        if (features.immediatePunish?.isHanging) {
+          explanation = `${played} was a ${labelText} because your ${features.immediatePunish.targetPieceName} can be taken immediately by ${features.immediatePunish.cheapestAttackerName === "pawn" ? "a pawn" : `the ${features.immediatePunish.cheapestAttackerName}`}.`;
+        } else {
+          explanation = `${played} was a ${labelText} because it left your ${features.movedPieceName} loose or underdefended.`;
+        }
+        break;
+      case "missed_tactic":
+        explanation = `${played} was a ${labelText} because it missed a forcing tactical idea. ${firstSentence(bestIdea)}.`;
+        break;
+      case "king_safety_mistake":
+        explanation = `${played} was a ${labelText} because it hurt king safety. It weakened your cover or opened lines too early.`;
+        break;
+      case "bad_trade":
+        explanation = `${played} was a ${labelText} because the trade helped the opponent more than it helped you.`;
+        break;
+      case "structural_weakening": {
+        const weakSquare = features.pawnWeakening.primaryWeakSquare;
+        const outpost = features.pawnWeakening.primaryOutpost;
+        const activeTarget = features.playedForkTargets[0];
+        const activeIdea = activeTarget
+          ? `it was active because it attacked the ${PIECE_NAMES[activeTarget.type] || "piece"} on ${activeTarget.square}`
+          : "it had an active short-term idea";
+        if (outpost) {
+          explanation = `${played} was a ${labelText} because ${activeIdea}, but it weakened ${outpost.square}. After this move, you can no longer control ${outpost.square} with a pawn, which gives the opponent a potential knight outpost there.`;
+        } else if (weakSquare) {
+          explanation = `${played} was a ${labelText} because ${activeIdea}, but it weakened the ${weakSquare} square. After this move, that square becomes much harder to cover with a pawn and can turn into a long-term hole.`;
+        } else {
+          explanation = `${played} was a ${labelText} because the pawn push created a long-term structural weakness even though the move looked active at first.`;
+        }
+        break;
+      }
+      case "passive_development":
+        explanation = `${played} was a ${labelText} because it developed a piece to a passive square. It improved less than ${move.bestSan || "the best move"} and made coordination harder.`;
+        break;
+      case "slow_opening_move":
+        explanation = `${played} was a ${labelText} because it was too slow for the opening. It did not help development, the center, or king safety.`;
+        break;
+      case "failed_conversion":
+        explanation = `${played} was a ${labelText} because it did not convert your advantage cleanly. It left extra counterplay on the board.`;
+        break;
+      case "poor_endgame_decision":
+        explanation = `${played} was a ${labelText} because it missed the main endgame priority.`;
+        break;
+      default:
+        if (isPositive) {
+          explanation = `${played} was ${labelText} because it ${movePurposeText}.`;
+        } else if (move.label === "Inaccuracy") {
+          explanation = `${played} was an inaccuracy because it was a bit too passive for the position. ${bestSuggestion}`;
+        } else {
+          explanation = `${played} was a ${labelText} because it did not meet the position's main demand. ${bestSuggestion}`;
+        }
+        break;
+    }
+
+    if (!isPositive && move.label === "Inaccuracy" && !explanation.includes("Better was")) {
+      explanation = `${firstSentence(explanation)} ${bestSuggestion}`.trim();
+    }
+
+    return {
+      moveNumber: move.moveNumber,
+      playedMove: played,
+      bestMove: move.bestSan || move.bestUci || "the engine move",
+      phase: features.phase,
+      movePurpose,
+      mainConcepts: conceptData.mainConcepts,
+      category: conceptData.category,
+      severity: severityFromCpl(move.cpl || 0),
+      explanation,
+      alternative: move.label === "Good" || move.label === "Inaccuracy" ? bestSuggestion : "",
+      whatChanged: consequences.whatChanged,
+      lesson: consequences.lesson,
+      advice: consequences.advice
+    };
+  }
+
+  function getCoachExplanationData(move, allPlayerMoves = []) {
+    const cacheKey = `${move.beforeFen || ""}|${move.afterFen || ""}|${move.label || ""}|${move.cpl || 0}`;
+    if (move.__coachCache?.key === cacheKey) {
+      return move.__coachCache.value;
+    }
+
+    const value = generateCoachExplanation(move, allPlayerMoves);
+    move.__coachCache = { key: cacheKey, value };
+    return value;
+  }
+
+  function pieceNameAtFen(fen, square) {
+    try {
+      const piece = new Chess(fen).get(square);
+      return piece ? PIECE_NAMES[piece.type] || "piece" : "piece";
+    } catch {
+      return "piece";
+    }
+  }
+
+  function phaseForMove(moveNumber) {
+    if (moveNumber <= 8) return "opening";
+    if (moveNumber <= 25) return "middlegame";
+    return "endgame";
+  }
+
+  function isKingPawnMove(move, color) {
+    return (color === "w" && ["f2", "g2", "h2"].includes(move.from)) || (color === "b" && ["f7", "g7", "h7"].includes(move.from));
+  }
+
+  function isMajorPieceMoveInOpening(move, beforeFen) {
+    const pieceName = pieceNameAtFen(beforeFen, move.from);
+    return move.moveNumber <= 8 && (pieceName === "queen" || pieceName === "rook" || pieceName === "king");
+  }
+
+  function bestMoveLooksForcing(move) {
+    return /\+|#|x/.test(move.bestSan || "") || /\+|#|x/.test(move.pvSan || "");
+  }
+
+  function detectLossCategory(move, allPlayerMoves) {
+    const features = extractMoveFeatures(move, allPlayerMoves);
+
+    if (move.moveNumber >= 20 && move.cpl > 220) {
+      return "late_game_blunder";
+    }
+    if (features.movedPieceLooseAfter && move.cpl >= 140) {
+      return "hung_piece";
+    }
+    if (features.bestForkTargets.length >= 2 && move.cpl >= 120) {
+      return "fork_tactic";
+    }
+    if (features.afterKing.danger > features.beforeKing.danger + 1 && move.cpl >= 110) {
+      return "king_safety";
+    }
+    if (features.featuresDetected.includes("back_rank_weakness") && move.cpl >= 110) {
+      return "back_rank";
+    }
+    if (features.captureTradeDown) {
+      return "bad_trade";
+    }
+    if (features.createdIsolatedPawn && move.cpl >= 90) {
+      return "isolated_pawn";
+    }
+    if (features.createdPassedPawn && move.cpl >= 90 && phaseForMove(move.moveNumber) === "endgame") {
+      return "passed_pawn";
+    }
+    if (
+      move.moveNumber <= 10 &&
+      (features.repeatedPieceInOpening || features.earlyQueenOrRookMove || features.flankPawnMove || isMajorPieceMoveInOpening(move, move.beforeFen))
+    ) {
+      return features.improvedDevelopment ? "slow_move" : "opening_principle_violation";
+    }
+    if (features.lateMistakePattern && move.moveNumber >= 20) {
+      return "time_pressure";
+    }
+    if (bestMoveLooksForcing(move) && move.cpl > 120) {
+      return "missed_tactic";
+    }
+    if (move.moveNumber <= 8 && move.cpl > 100) {
+      return "early_game_mistake";
+    }
+    return "missed_threat";
+  }
+
+  function detectWinCategory(opponentMove, playerMoves) {
+    const features = extractMoveFeatures(opponentMove, playerMoves);
+    const cleanReplies = playerMoves.filter((move) => move.moveNumber >= opponentMove.moveNumber && move.cpl <= 60);
+    if (features.movedPieceLooseAfter) {
+      return "loose_piece_punished";
+    }
+    if (features.bestForkTargets.length >= 2 || bestMoveLooksForcing(opponentMove)) {
+      return "tactical_shot";
+    }
+    if (opponentMove.moveNumber >= 20 && cleanReplies.length >= 2) {
+      return "solid_endgame";
+    }
+    if (opponentMove.moveNumber <= 8) {
+      return "strong_opening";
+    }
+    if (
+      features.afterKing.danger > features.beforeKing.danger + 1 ||
+      (opponentMove.bestSan || "").includes("+") ||
+      (opponentMove.pvSan || "").includes("+")
+    ) {
+      return "strong_attack";
+    }
+    if (features.createdPassedPawn && phaseForMove(opponentMove.moveNumber) === "endgame") {
+      return "passed_pawn_play";
+    }
+    if (cleanReplies.length >= 2) {
+      return "good_conversion";
+    }
+    return "capitalized_blunder";
+  }
+
+  function buildExplanationFromCategory(category, move, result, details = null) {
+    const piece = pieceNameAtFen(move.beforeFen, move.from);
+    const phase = phaseForMove(move.moveNumber);
+    const movePrefix = movePrefixText(move);
+    const features = details || extractMoveFeatures(move, []);
+    const subjectIsOpponent = result === "win" && move.color !== state.viewerColor;
+    const subject = subjectIsOpponent ? "your opponent" : "you";
+    const possessive = subjectIsOpponent ? "their" : "your";
+    const best = move.bestSan || move.bestUci || "the engine move";
+
+    const templates = {
+      hung_piece: {
+        reason: `On ${movePrefix}, ${subject} left ${possessive} ${piece} loose${move.to ? ` on ${move.to}` : ""}, and the position swung immediately.`,
+        lesson: "Loose pieces get punished quickly.",
+        advice: "Before every move, check which of your pieces is undefended or only defended once."
+      },
+      missed_threat: {
+        reason: `On ${movePrefix}, ${subject} missed the opponent's main threat and the position turned immediately.`,
+        lesson: "A good move still fails if it ignores the opponent's forcing idea.",
+        advice: "Before moving, scan checks, captures, and threats for your opponent first."
+      },
+      bad_trade: {
+        reason: `On ${movePrefix}, the trade looked natural, but it left ${subjectIsOpponent ? "them" : "you"} worse in the resulting ${phase}.`,
+        lesson: "Trades are only good when the resulting position still works for you.",
+        advice: "Before exchanging, ask whether the end position helps your worst piece, king safety, or pawn structure."
+      },
+      king_safety: {
+        reason: `On ${movePrefix}, ${subject} weakened ${possessive} king and gave the other side clear targets.`,
+        lesson: "King safety usually matters more than a hopeful attack.",
+        advice: "Avoid pawn pushes around your king unless you gain something concrete right away."
+      },
+      time_pressure: {
+        reason: `The key swing came on ${movePrefix}, and it fits the same rushed late-game decisions that keep showing up.`,
+        lesson: "Speeding up in sharp positions creates avoidable losses.",
+        advice: "When the game gets tense after move 20, slow down long enough to check one blunder before playing."
+      },
+      late_game_blunder: {
+        reason: `On ${movePrefix}, one late blunder wiped out the work that came before it.`,
+        lesson: "Winning or equal games still need clean moves late on.",
+        advice: "In late positions, simplify your thought process: king safety, loose pieces, then forcing moves."
+      },
+      early_game_mistake: {
+        reason: `On ${movePrefix}, ${subject} drifted from the basic needs of the opening and fell behind too early.`,
+        lesson: "Opening errors often show up later as harder positions to defend.",
+        advice: "Develop minor pieces and finish king safety before spending time on queen or rook moves."
+      },
+      opening_principle_violation: {
+        reason: `On ${movePrefix}, ${subject} spent a tempo on the wrong thing instead of development or king safety.`,
+        lesson: "Openings punish slow queen moves, repeated piece moves, and side-pawn pushes more than they seem to.",
+        advice: "In the first 8 to 10 moves, prioritize pieces toward the center and get castled."
+      },
+      slow_move: {
+        reason: `On ${movePrefix}, ${subject} made a move that was playable but too slow for the position's needs.`,
+        lesson: "Tempo matters most when both sides are still organizing their pieces.",
+        advice: "If the position is still in development, ask which move improves your worst minor piece first."
+      },
+      missed_tactic: {
+        reason: `On ${movePrefix}, ${subject} missed a tactical idea. ${best} was stronger because it created immediate threats.`,
+        lesson: "Big swings often come from one forcing move you did not calculate.",
+        advice: "When a position is tactical, spend a few extra seconds checking checks, captures, and direct threats."
+      },
+      fork_tactic: {
+        reason: `On ${movePrefix}, ${subject} missed a fork or double attack. ${best} was stronger because it hit ${describeTargets(features.bestForkTargets)} at once.`,
+        lesson: "Forks are strongest when one move attacks two important targets and forces an awkward reply.",
+        advice: "Before moving on, look for knight jumps, pawn pushes, or queen moves that attack two pieces at once."
+      },
+      back_rank: {
+        reason: `On ${movePrefix}, ${subject} left the back rank too tight and gave heavy pieces tactical ideas right away.`,
+        lesson: "A king with no luft can turn a normal move into a back-rank tactic.",
+        advice: "Create an escape square or keep enough defenders on the back rank before chasing activity elsewhere."
+      },
+      isolated_pawn: {
+        reason: `On ${movePrefix}, ${subject} created an isolated pawn and gave the other side a clean long-term target.`,
+        lesson: "Static pawn weaknesses matter more once the tactics settle down.",
+        advice: "Before a pawn push, check whether that pawn will still have support from a neighboring pawn afterward."
+      },
+      passed_pawn: {
+        reason: `On ${movePrefix}, ${subject} let a passed pawn become the main feature of the position.`,
+        lesson: "Passed pawns get stronger as pieces come off the board.",
+        advice: "In endgames, spend extra time asking whether a pawn race or pawn breakthrough is about to start."
+      },
+      capitalized_blunder: {
+        reason: `You won because after ${movePrefix}, the position became clearly easier and you took the chance right away.`,
+        lesson: "Good players cash in when the position suddenly becomes easier.",
+        advice: "Keep punishing big mistakes by taking the material or simplifying immediately."
+      },
+      loose_piece_punished: {
+        reason: `You won because on ${movePrefix}, your opponent left a loose ${piece}, and the position was ripe for punishment.`,
+        lesson: "Loose pieces rarely survive for long when the other side is alert.",
+        advice: "Whenever your opponent moves, scan once for pieces that lost a defender or moved onto a vulnerable square."
+      },
+      tactical_shot: {
+        reason: `You won because the position around ${movePrefix} contained a tactical shot, and the follow-up was forcing.`,
+        lesson: "Tactics appear when pieces are overloaded, loose, or lined up awkwardly.",
+        advice: "When the eval suddenly jumps, check for forks, discovered attacks, and deflections before anything else."
+      },
+      strong_attack: {
+        reason: `You won because by ${movePrefix}, the pressure on the king was real and the attack kept growing.`,
+        lesson: "Attacks work when more than one piece joins the pressure.",
+        advice: "When the king is exposed, improve one more attacker before forcing everything."
+      },
+      good_conversion: {
+        reason: `You won because after ${movePrefix}, you kept control instead of letting counterplay back in.`,
+        lesson: "Conversion is about staying clean once you are better.",
+        advice: "When ahead, look for trades, safer king positions, and moves that remove your opponent's activity."
+      },
+      solid_endgame: {
+        reason: `You won because after ${movePrefix}, you handled the ending more cleanly than your opponent.`,
+        lesson: "Small endgame edges grow when you keep the position simple.",
+        advice: "Keep repeating the habit of removing counterplay before pushing for something bigger."
+      },
+      strong_opening: {
+        reason: `You won because by ${movePrefix}, you already had the healthier position out of the opening.`,
+        lesson: "Good openings make the middlegame easier to play.",
+        advice: "Keep prioritizing development and king safety before chasing side ideas."
+      },
+      passed_pawn_play: {
+        reason: `You won because by ${movePrefix}, the passed pawn or runner in the ending became too strong to ignore.`,
+        lesson: "Passed pawns force the other side to react, which makes conversion much easier.",
+        advice: "In better endgames, keep asking whether pushing the passer or trading into a pawn race helps you most."
+      }
+    };
+
+    return templates[category] || {
+      reason: result === "loss"
+        ? `On ${movePrefix}, the position turned against you for concrete tactical reasons.`
+        : `On ${movePrefix}, the game finally tipped your way and you kept the edge.`,
+      lesson: "The biggest lesson is hidden in one critical moment, not in every small inaccuracy.",
+      advice: "Review the biggest swing first, then focus on one habit you can repeat next game."
+    };
+  }
+
+  function buildMoveTeachingNotes(move) {
+    const coach = getCoachExplanationData(move);
+    return {
+      category: coach.category,
+      severity: coach.severity,
+      featuresDetected: coach.mainConcepts,
+      lesson: coach.lesson,
+      advice: coach.advice,
+      alternative: coach.alternative,
+      movePurpose: coach.movePurpose,
+      mainConcepts: coach.mainConcepts,
+      whatChanged: coach.whatChanged
+    };
+  }
 
   function sendRuntimeMessage(message) {
     return new Promise((resolve, reject) => {
@@ -322,6 +2381,35 @@
     return moves.filter((move) => move.cpl > 100 && move.cpl <= 200).length;
   }
 
+  function countInaccuraciesOnly(moves) {
+    return moves.filter((move) => move.label === "Inaccuracy" || (move.cpl > 60 && move.cpl <= 100)).length;
+  }
+
+  function buildPhaseBreakdown(moves) {
+    const breakdown = {
+      opening: { mistakes: 0, blunders: 0, moves: 0 },
+      middlegame: { mistakes: 0, blunders: 0, moves: 0 },
+      endgame: { mistakes: 0, blunders: 0, moves: 0 }
+    };
+
+    for (const move of moves) {
+      const phase = move.phase || phaseForMove(move.moveNumber);
+      if (!breakdown[phase]) {
+        continue;
+      }
+
+      breakdown[phase].moves += 1;
+
+      if (move.cpl > 200) {
+        breakdown[phase].blunders += 1;
+      } else if (move.cpl > 100) {
+        breakdown[phase].mistakes += 1;
+      }
+    }
+
+    return breakdown;
+  }
+
   function dominantTag(tags) {
     const counts = {};
     for (const tag of tags) {
@@ -331,49 +2419,46 @@
   }
 
   function buildGameTags(playerMoves, opponentMoves, result) {
-    const mistakeTags = [];
-    const goodTags = [];
+    const mistakeTags = new Set();
+    const goodTags = new Set();
     const bigMistakes = playerMoves.filter((move) => move.cpl > 100);
     const blunders = playerMoves.filter((move) => move.cpl > 200);
-    const openingMistakes = playerMoves.filter((move) => move.moveNumber <= 5 && move.cpl > 100);
     const lateMistakes = playerMoves.filter((move) => move.moveNumber >= 20 && move.cpl > 100);
     const endgameMoves = playerMoves.filter((move) => move.moveNumber >= 20);
     const openingMoves = playerMoves.filter((move) => move.moveNumber <= 5);
 
-    if (blunders.length) {
-      mistakeTags.push("hung_piece");
-    }
+    bigMistakes.slice(0, 4).forEach((move) => {
+      mistakeTags.add(detectLossCategory(move, playerMoves));
+    });
+
     if (lateMistakes.length >= 2) {
-      mistakeTags.push("time_pressure");
-    }
-    if (blunders.some((move) => move.moveNumber >= 20)) {
-      mistakeTags.push("late_game_blunder");
-    }
-    if (openingMistakes.length) {
-      mistakeTags.push("early_game_mistake");
+      mistakeTags.add("time_pressure");
     }
 
     if (result === "win" && opponentMoves.some((move) => move.cpl > 200)) {
-      goodTags.push("capitalized_blunder");
+      opponentMoves
+        .filter((move) => move.cpl > 100)
+        .slice(0, 3)
+        .forEach((move) => goodTags.add(detectWinCategory(move, playerMoves)));
     }
     if (endgameMoves.length >= 4 && endgameMoves.every((move) => move.cpl <= 100)) {
-      goodTags.push("solid_endgame");
+      goodTags.add("solid_endgame");
     }
     if (lateMistakes.length === 0 && endgameMoves.length >= 4) {
-      goodTags.push("good_time_management");
+      goodTags.add("good_time_management");
     }
     if (openingMoves.length >= 4 && openingMoves.every((move) => move.cpl <= 60)) {
-      goodTags.push("strong_opening");
+      goodTags.add("strong_opening");
     }
 
     if (!mistakeTags.length && result === "loss" && bigMistakes.length) {
-      mistakeTags.push("hung_piece");
+      mistakeTags.add("hung_piece");
     }
     if (!goodTags.length && result === "win") {
-      goodTags.push(opponentMoves.some((move) => move.cpl > 100) ? "capitalized_blunder" : "strong_opening");
+      goodTags.add(opponentMoves.some((move) => move.cpl > 100) ? "capitalized_blunder" : "strong_opening");
     }
 
-    return { mistakeTags, goodTags };
+    return { mistakeTags: [...mistakeTags], goodTags: [...goodTags] };
   }
 
   function buildInsights(playerMoves, opponentMoves) {
@@ -381,15 +2466,16 @@
     const mistakesAfter20 = playerMoves.filter((move) => move.cpl > 100 && move.moveNumber > 20).length;
     const totalMistakes = playerMoves.filter((move) => move.cpl > 100).length;
     const biggestSwing = [...playerMoves].sort((a, b) => b.cpl - a.cpl)[0];
+    const opponentBlunder = opponentMoves.filter((move) => move.cpl > 200).length;
 
     if (mistakesAfter20 > 0 && mistakesAfter20 >= Math.max(1, Math.ceil(totalMistakes / 2))) {
       insights.push("Most mistakes happened after move 20.");
     }
-    if (opponentMoves.filter((move) => move.cpl > 200).length) {
-      insights.push("Your opponent gave you at least one major swing to work with.");
+    if (opponentBlunder) {
+      insights.push(`Your opponent made ${opponentBlunder} major mistake${opponentBlunder === 1 ? "" : "s"} that you could punish.`);
     }
     if (biggestSwing) {
-      insights.push(`Biggest swing: move ${biggestSwing.moveNumber} (${biggestSwing.san}).`);
+      insights.push(`Your biggest swing came on move ${biggestSwing.moveNumber} (${biggestSwing.san}).`);
     }
     if (!insights.length) {
       insights.push("This game was decided by a small number of critical swings.");
@@ -421,48 +2507,104 @@
     const opponentMoves = results.filter((move) => move.color !== state.viewerColor);
     const blunders = countMovesByThreshold(playerMoves, 200);
     const mistakes = countMistakesOnly(playerMoves);
+    const inaccuracies = countInaccuraciesOnly(playerMoves);
+    const phaseBreakdown = buildPhaseBreakdown(playerMoves);
     const tags = buildGameTags(playerMoves, opponentMoves, result);
-    const reasonTag = result === "loss" ? dominantTag(tags.mistakeTags) : dominantTag(tags.goodTags);
-    const reasonText =
-      (result === "loss" ? MISTAKE_COPY[reasonTag] : STRENGTH_COPY[reasonTag]) ||
-      (result === "loss"
-        ? "A few big mistakes swung the game against you."
-        : result === "win"
-          ? "You handled the key moments better than your opponent."
-          : "The game came down to a few balanced turning points.");
+    const biggestLoss = [...playerMoves].sort((a, b) => b.cpl - a.cpl)[0] || null;
+    const biggestWin = [...opponentMoves].sort((a, b) => b.cpl - a.cpl)[0] || null;
+    const focusMove = result === "loss" ? biggestLoss : result === "win" ? biggestWin : biggestLoss || biggestWin;
+    const reasonTag = focusMove
+      ? result === "loss"
+        ? detectLossCategory(focusMove, playerMoves)
+        : detectWinCategory(focusMove, playerMoves)
+      : result === "loss"
+        ? dominantTag(tags.mistakeTags)
+        : dominantTag(tags.goodTags);
+    const focusFeatures = focusMove
+      ? extractMoveFeatures(focusMove, result === "loss" ? playerMoves : opponentMoves)
+      : null;
+    const explanation = focusMove
+      ? buildExplanationFromCategory(reasonTag, focusMove, result, focusFeatures)
+      : {
+          reason: result === "loss"
+            ? "A few big mistakes swung the game against you."
+            : result === "win"
+              ? "You handled the key moments better than your opponent."
+              : "The game came down to a few balanced turning points.",
+          lesson: "The most useful review starts with the single biggest swing.",
+          advice: "Focus on one repeatable habit from this game before looking at everything else."
+        };
 
     return {
       gameId: parseGameId() || `${Date.now()}`,
+      date: Date.now(),
       result,
+      color: state.viewerColor === "b" ? "black" : "white",
+      opening: null,
       blunders,
       mistakes,
+      inaccuracies,
       moveCount: results.length,
+      phaseBreakdown,
       reasonTag,
-      reasonText,
+      primaryReason: reasonTag,
+      reasonText: explanation.reason,
+      lessonText: explanation.lesson,
+      adviceText: explanation.advice,
+      focusMoveNumber: focusMove?.moveNumber || null,
       mistakeTags: tags.mistakeTags,
       goodTags: tags.goodTags,
-      insights: buildInsights(playerMoves, opponentMoves)
+      summary: {
+        headline: explanation.reason,
+        lesson: explanation.lesson,
+        advice: explanation.advice
+      },
+      insights: [
+        `Lesson: ${explanation.lesson}`,
+        `Advice: ${explanation.advice}`,
+        ...buildInsights(playerMoves, opponentMoves).filter(Boolean)
+      ].slice(0, 4)
     };
   }
 
   async function saveReviewAndGetPatterns(reviewSummary) {
     try {
+      const accessResponse = await sendRuntimeMessage({ type: "crf:get-access" }).catch(() => null);
+      const access = accessResponse?.ok
+        ? accessResponse.access
+        : { userPlan: "free", hasProAccess: false, ownerBypass: false };
+      console.log("[CRF content] analysis finished", {
+        gameId: reviewSummary.gameId,
+        userPlan: access.userPlan,
+        hasProAccess: access.hasProAccess,
+        ownerBypass: access.ownerBypass,
+        result: reviewSummary.result
+      });
       const response = await sendRuntimeMessage({
         type: "crf:save-review",
         payload: {
           gameId: reviewSummary.gameId,
+          date: reviewSummary.date,
           result: reviewSummary.result,
+          color: reviewSummary.color,
+          opening: reviewSummary.opening,
           blunders: reviewSummary.blunders,
           mistakes: reviewSummary.mistakes,
+          inaccuracies: reviewSummary.inaccuracies,
           mistakeTags: reviewSummary.mistakeTags,
           goodTags: reviewSummary.goodTags,
           moveCount: reviewSummary.moveCount,
+          phaseBreakdown: reviewSummary.phaseBreakdown,
+          primaryReason: reviewSummary.primaryReason,
           reasonTag: reviewSummary.reasonTag,
+          summary: reviewSummary.summary,
           createdAt: Date.now()
         }
       });
+      console.log("[CRF content] save-review response", response);
       return response?.ok ? response.summary : null;
     } catch {
+      console.error("[CRF content] saveReviewAndGetPatterns failed");
       return null;
     }
   }
@@ -708,6 +2850,62 @@
     return detectBoardOrientation() === "black" ? "b" : "w";
   }
 
+  async function openChessDNAProfile() {
+    const accessResponse = await sendRuntimeMessage({ type: "crf:get-access" }).catch(() => null);
+    const access = accessResponse?.ok ? accessResponse.access : { hasProAccess: false };
+    if (access.hasProAccess) {
+      openProfileOverlay();
+      return;
+    }
+
+    if (state.dnaLock) {
+      state.dnaLock.classList.toggle("crf-hidden");
+    }
+  }
+
+  function closeProfileOverlay() {
+    if (!state.dnaOverlay) {
+      return;
+    }
+    state.dnaOverlay.remove();
+    state.dnaOverlay = null;
+  }
+
+  function openProfileOverlay() {
+    if (state.dnaOverlay) {
+      return;
+    }
+
+    const overlay = document.createElement("div");
+    overlay.id = "crf-dna-overlay";
+    overlay.innerHTML = `
+      <div class="crf-dna-overlay-backdrop"></div>
+      <div class="crf-dna-overlay-content">
+        <button id="crf-dna-overlay-close" type="button" aria-label="Close Chess DNA">×</button>
+        <iframe
+          id="crf-dna-overlay-frame"
+          src="${chrome.runtime.getURL("profile.html")}?embedded=1"
+          title="Chess DNA Profile"
+        ></iframe>
+      </div>
+    `;
+
+    overlay.querySelector(".crf-dna-overlay-backdrop")?.addEventListener("click", closeProfileOverlay);
+    overlay.querySelector("#crf-dna-overlay-close")?.addEventListener("click", closeProfileOverlay);
+    document.documentElement.appendChild(overlay);
+    state.dnaOverlay = overlay;
+  }
+
+  function highlightDnaCta() {
+    if (!state.dnaLauncher) {
+      return;
+    }
+    state.dnaLauncher.classList.add("crf-dna-cta-highlight");
+    window.setTimeout(() => {
+      state.dnaLauncher?.classList.remove("crf-dna-cta-highlight");
+    }, 2600);
+  }
+
   function ensureUi() {
     if (state.root && state.launcher) {
       return;
@@ -720,6 +2918,29 @@
     launcher.addEventListener("click", () => {
       state.root.classList.remove("crf-hidden");
       launcher.classList.add("crf-hidden");
+    });
+
+    const dnaLauncher = document.createElement("button");
+    dnaLauncher.id = "crf-dna-launcher";
+    dnaLauncher.type = "button";
+    dnaLauncher.textContent = "View Chess DNA";
+    dnaLauncher.addEventListener("click", () => {
+      openChessDNAProfile().catch((error) => console.error("[CRF DNA] failed to open profile", error));
+    });
+
+    const dnaLock = document.createElement("aside");
+    dnaLock.id = "crf-dna-lock";
+    dnaLock.className = "crf-hidden";
+    dnaLock.innerHTML = `
+      <strong>Unlock Chess DNA</strong>
+      <p>Game library, weakest phase analysis, and recurring mistake patterns.</p>
+      <span>$8/month</span>
+      <button id="crf-dna-upgrade" type="button">Upgrade with Stripe</button>
+    `;
+    dnaLock.querySelector("#crf-dna-upgrade")?.addEventListener("click", () => {
+      sendRuntimeMessage({ type: "crf:open-upgrade" }).catch((error) => {
+        console.error("[CRF DNA] failed to open upgrade", error);
+      });
     });
 
     const root = document.createElement("aside");
@@ -772,17 +2993,29 @@
             <strong>Review Board</strong>
             <span class="crf-muted">Step through the game or branch into edit mode</span>
           </div>
-          <div class="crf-board-shell">
-            <div class="crf-board-wrap">
-              <div class="crf-eval-bar-shell">
-                <div class="crf-eval-label crf-eval-label-top" id="crf-eval-top">+0.0</div>
-                <div class="crf-eval-bar" id="crf-eval-bar">
-                  <div class="crf-eval-fill" id="crf-eval-fill"></div>
+          <div class="crf-board-stage">
+            <div class="crf-board-shell">
+              <div class="crf-board-wrap">
+                <div class="crf-eval-bar-shell">
+                  <div class="crf-eval-label crf-eval-label-top" id="crf-eval-top">+0.0</div>
+                  <div class="crf-eval-bar" id="crf-eval-bar">
+                    <div class="crf-eval-fill" id="crf-eval-fill"></div>
+                  </div>
+                  <div class="crf-eval-label crf-eval-label-bottom" id="crf-eval-bottom">+0.0</div>
                 </div>
-                <div class="crf-eval-label crf-eval-label-bottom" id="crf-eval-bottom">+0.0</div>
+                <div class="crf-board-surface">
+                  <div id="crf-board" class="crf-board"></div>
+                  <div id="crf-board-coordinates" class="crf-board-coordinates" aria-hidden="true"></div>
+                </div>
               </div>
-              <div id="crf-board" class="crf-board"></div>
             </div>
+            <aside class="crf-coach-panel">
+              <div class="crf-coach-avatar" aria-hidden="true">
+                <div class="crf-coach-logo">♞</div>
+              </div>
+              <div class="crf-coach-label" id="crf-coach-label">Chess Coach</div>
+              <div class="crf-coach-explanation" id="crf-coach-explanation">Pick a move on the board or in the move list to see exactly why it was labeled best, good, inaccuracy, mistake, or blunder.</div>
+            </aside>
           </div>
           <div class="crf-board-controls">
             <button class="crf-nav" id="crf-prev-move" type="button">Previous</button>
@@ -819,7 +3052,7 @@
       </div>
     `;
 
-    document.documentElement.append(root, launcher);
+    document.documentElement.append(root, launcher, dnaLauncher, dnaLock);
 
     root.querySelector("#crf-close").addEventListener("click", () => {
       root.classList.add("crf-hidden");
@@ -828,6 +3061,8 @@
 
     state.root = root;
     state.launcher = launcher;
+    state.dnaLauncher = dnaLauncher;
+    state.dnaLock = dnaLock;
     state.status = root.querySelector("#crf-status");
     state.progressBar = root.querySelector("#crf-progress-bar");
     state.resultBadge = root.querySelector("#crf-result-badge");
@@ -842,8 +3077,11 @@
     state.moves = root.querySelector("#crf-moves");
     state.chart = root.querySelector("#crf-chart");
     state.board = root.querySelector("#crf-board");
+    state.boardCoordinates = root.querySelector("#crf-board-coordinates");
     state.boardCaption = root.querySelector("#crf-board-caption");
     state.boardHelper = root.querySelector("#crf-board-helper");
+    state.coachLabel = root.querySelector("#crf-coach-label");
+    state.coachExplanation = root.querySelector("#crf-coach-explanation");
     state.prevMoveButton = root.querySelector("#crf-prev-move");
     state.nextMoveButton = root.querySelector("#crf-next-move");
     state.engineMoveButton = root.querySelector("#crf-engine-move");
@@ -878,6 +3116,27 @@
       null
     );
   }
+
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === "crf:open-profile-overlay") {
+      openChessDNAProfile()
+        .then(() => sendResponse({ ok: true }))
+        .catch((error) => sendResponse({ ok: false, error: error?.message || String(error) }));
+      return true;
+    }
+
+    return false;
+  });
+
+  window.addEventListener("message", (event) => {
+    if (event.origin !== chrome.runtime.getURL("").slice(0, -1)) {
+      return;
+    }
+
+    if (event.data?.type === "crf:close-profile-overlay") {
+      closeProfileOverlay();
+    }
+  });
 
   function enableDragging(root) {
     const handle = root.querySelector("#crf-drag-handle");
@@ -953,6 +3212,22 @@
     if (state.insightList) {
       state.insightList.innerHTML = summary.insights.map((insight) => `<li>${escapeHtml(insight)}</li>`).join("");
     }
+  }
+
+  function updateCoachPanel(move) {
+    if (!state.coachLabel || !state.coachExplanation) {
+      return;
+    }
+
+    if (!move) {
+      state.coachLabel.textContent = "Chess Coach";
+      state.coachExplanation.textContent = "Pick a move on the board or in the move list to see exactly why it was labeled best, good, inaccuracy, mistake, or blunder.";
+      return;
+    }
+
+    const movePrefix = move.color === "w" ? `${move.moveNumber}. ${move.san}` : `${move.moveNumber}... ${move.san}`;
+    state.coachLabel.textContent = `Why ${movePrefix} was ${safeLabelText(move)}`;
+    state.coachExplanation.textContent = buildCoachPanelCopy(move);
   }
 
   function setProgress(current, total) {
@@ -1049,6 +3324,10 @@
     }
 
     return "Blunder";
+  }
+
+  function buildMoveExplanation(move) {
+    return getCoachExplanationData(move).explanation;
   }
 
   function scoreToCp(score) {
@@ -1286,6 +3565,7 @@
               <span class="crf-kbd">Eval ${escapeHtml(formatEngineEvalText(move.afterScore || { unit: "cp", value: 0 }))}</span>
             </div>
             <p class="crf-muted">Best move: <strong>${escapeHtml(move.bestSan || move.bestUci || "N/A")}</strong> · Played: <strong>${escapeHtml(move.san)}</strong></p>
+            <p class="crf-move-expl">${escapeHtml(move.explanation || `${escapeHtml(move.san || "Move")} was labeled ${escapeHtml(safeLabelText(move))}.`)}</p>
             <p class="crf-muted">Engine line: ${escapeHtml(move.pvSan || move.bestUci || "N/A")}</p>
           </article>
         `;
@@ -1364,12 +3644,12 @@
 
   function pieceGlyph(piece) {
     const glyphs = {
-      p: { w: "♙", b: "♟" },
-      n: { w: "♘", b: "♞" },
-      b: { w: "♗", b: "♝" },
-      r: { w: "♖", b: "♜" },
-      q: { w: "♕", b: "♛" },
-      k: { w: "♔", b: "♚" }
+      p: { w: "♟", b: "♟" },
+      n: { w: "♞", b: "♞" },
+      b: { w: "♝", b: "♝" },
+      r: { w: "♜", b: "♜" },
+      q: { w: "♛", b: "♛" },
+      k: { w: "♚", b: "♚" }
     };
 
     return glyphs[piece.type]?.[piece.color] || "";
@@ -1409,6 +3689,39 @@
     return `${moveNumber} ${move.san} · ${move.label} · Accuracy ${move.accuracy}%`;
   }
 
+  function renderFiles(orientation = "white") {
+    const files = orientation === "white"
+      ? ["a", "b", "c", "d", "e", "f", "g", "h"]
+      : ["h", "g", "f", "e", "d", "c", "b", "a"];
+
+    return files.map((file, index) => {
+      const left = `${(index * 12.5) + 1.8}%`;
+      return `<div class="crf-coord-file" style="left:${left}">${file}</div>`;
+    }).join("");
+  }
+
+  function renderRanks(orientation = "white") {
+    const ranks = orientation === "white"
+      ? ["8", "7", "6", "5", "4", "3", "2", "1"]
+      : ["1", "2", "3", "4", "5", "6", "7", "8"];
+
+    return ranks.map((rank, index) => {
+      const top = `${(index * 12.5) + 1.2}%`;
+      return `<div class="crf-coord-rank" style="top:${top}">${rank}</div>`;
+    }).join("");
+  }
+
+  function renderCoordinates(orientation = "white") {
+    if (!state.boardCoordinates) {
+      return;
+    }
+
+    state.boardCoordinates.innerHTML = `
+      ${renderFiles(orientation)}
+      ${renderRanks(orientation)}
+    `;
+  }
+
   function renderBoardAtPly(plyIndex) {
     if (!state.board || !state.boardCaption || !state.prevMoveButton || !state.nextMoveButton) {
       return;
@@ -1430,6 +3743,9 @@
         ? state.currentResults[Math.min(state.currentPlyIndex - 1, state.currentResults.length - 1)] ||
           state.currentMoves[Math.min(state.currentPlyIndex - 1, state.currentMoves.length - 1)]
         : null;
+    const coachMove = state.analysisActive
+      ? state.analysisByFen[state.analysisFen] || state.analysisResult
+      : selectedMove;
     const sticker = selectedMove ? stickerForLabel(selectedMove.label) : null;
 
     state.board.innerHTML = ranks
@@ -1450,15 +3766,17 @@
             return `
               <div class="crf-square ${squareClass}${isSelected ? " crf-square-selected" : ""}${isTarget ? " crf-square-target" : ""}" data-square="${square}">
                 ${stickerMarkup}
-                <span class="crf-piece">${escapeHtml(piece ? pieceGlyph(piece) : "")}</span>
+                <span class="crf-piece${piece ? ` crf-piece-${piece.color} crf-piece-type-${piece.type}` : ""}">${escapeHtml(piece ? pieceGlyph(piece) : "")}</span>
               </div>
             `;
           })
           .join("")
       )
       .join("");
+    renderCoordinates(state.boardOrientation);
 
     state.boardCaption.textContent = captionForPly(state.currentPlyIndex);
+    updateCoachPanel(coachMove);
     state.prevMoveButton.disabled = state.analysisActive || state.currentPlyIndex <= 0;
     state.nextMoveButton.disabled = state.analysisActive || state.currentPlyIndex >= state.currentMoves.length;
     updateAnalysisActionButtons();
@@ -1557,6 +3875,35 @@
             bestScore,
             pvSan: pvToSan(beforeFen, best.pv)
           };
+          const teaching = buildMoveTeachingNotes({
+            ...result,
+            san: played.san,
+            from: played.from,
+            to: played.to,
+            color: played.color,
+            beforeFen,
+            afterFen,
+            moveNumber: state.analysisMoves.length ? state.analysisMoves.length : 1
+          });
+          result.explanation = buildMoveExplanation({
+            ...result,
+            san: played.san,
+            from: played.from,
+            to: played.to,
+            color: played.color,
+            beforeFen,
+            afterFen,
+            moveNumber: state.analysisMoves.length ? state.analysisMoves.length : 1
+          });
+          result.category = teaching.category;
+          result.severity = teaching.severity;
+          result.featuresDetected = teaching.featuresDetected;
+          result.movePurpose = teaching.movePurpose;
+          result.mainConcepts = teaching.mainConcepts;
+          result.alternative = teaching.alternative;
+          result.whatChanged = teaching.whatChanged;
+          result.lesson = teaching.lesson;
+          result.advice = teaching.advice;
 
           state.analysisByFen[afterFen] = result;
 
@@ -2006,18 +4353,32 @@
         const cpl = Math.max(0, Math.round(bestCp - playedCp));
         const accuracy = accuracyFromCpl(cpl);
         const label = classifyMove(cpl, move.uci, best.bestmove);
-
-        results.push({
+        const moveData = {
           ...move,
           cpl,
           accuracy,
           label,
           bestUci: best.bestmove,
           bestSan: uciToSan(move.beforeFen, best.bestmove),
-          playedScore: { unit: "cp", value: playedCp },
           afterScore,
           bestScore,
           pvSan: pvToSan(move.beforeFen, best.pv)
+        };
+        const teaching = buildMoveTeachingNotes(moveData);
+
+        results.push({
+          ...moveData,
+          playedScore: { unit: "cp", value: playedCp },
+          explanation: buildMoveExplanation(moveData),
+          category: teaching.category,
+          severity: teaching.severity,
+          featuresDetected: teaching.featuresDetected,
+          movePurpose: teaching.movePurpose,
+          mainConcepts: teaching.mainConcepts,
+          alternative: teaching.alternative,
+          whatChanged: teaching.whatChanged,
+          lesson: teaching.lesson,
+          advice: teaching.advice
         });
 
         state.currentResults = results.slice();
@@ -2031,6 +4392,7 @@
 
       const reviewSummary = buildReviewSummary(gameData, results);
       const patternSummary = await saveReviewAndGetPatterns(reviewSummary);
+      highlightDnaCta();
       setReviewHero(reviewSummary, patternSummary);
       setProgress(moves.length, moves.length);
       renderBoardAtPly(0);
