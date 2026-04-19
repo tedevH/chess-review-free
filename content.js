@@ -2096,35 +2096,294 @@
     return "";
   }
 
+  function legalMovesFromSquare(fen, color, square) {
+    if (!fen || !square) {
+      return [];
+    }
+
+    try {
+      return new Chess(withTurnInFen(fen, color)).moves({ square, verbose: true }) || [];
+    } catch {
+      return [];
+    }
+  }
+
+  function describePieceTarget(target, withArticle = true) {
+    if (!target) {
+      return withArticle ? "the piece" : "piece";
+    }
+
+    const name = PIECE_NAMES[target.type] || "piece";
+    return withArticle ? `the ${name} on ${target.square}` : `${name} on ${target.square}`;
+  }
+
+  function squarePriority(square, color, enemyKingSquares = [], ownKingSquares = []) {
+    let score = 0;
+    if (isCenterSquare(square)) score += 6;
+    if (isExtendedCenterSquare(square)) score += 3;
+    if (enemyKingSquares.includes(square)) score += 5;
+    if (ownKingSquares.includes(square)) score += 4;
+    const rank = squareRankIndex(square);
+    if (color === "w") {
+      score += rank;
+    } else {
+      score += 9 - rank;
+    }
+    return score;
+  }
+
+  function summarizeSquarePressure(squares, color, enemyKingSquares = [], ownKingSquares = []) {
+    const uniqueSquares = [...new Set((squares || []).filter(Boolean))];
+    if (!uniqueSquares.length) {
+      return "";
+    }
+
+    const sorted = uniqueSquares
+      .sort((a, b) => squarePriority(b, color, enemyKingSquares, ownKingSquares) - squarePriority(a, color, enemyKingSquares, ownKingSquares))
+      .slice(0, 2);
+
+    return joinNaturalLanguage(sorted);
+  }
+
+  function analyzeConcreteImpacts(move, features) {
+    const movedPiece = features.movedPiece;
+    if (!movedPiece || !move?.to || !move?.afterFen) {
+      return {
+        attackedTargets: [],
+        defendedTargets: [],
+        newlyDefendedTargets: [],
+        pressuredSquares: [],
+        enemyKingSquares: [],
+        ownKingSquares: []
+      };
+    }
+
+    const enemyColor = oppositeColor(move.color);
+    const enemyPieces = collectPieces(move.afterFen, enemyColor).filter((piece) => piece.type !== "k");
+    const legalMoves = legalMovesFromSquare(move.afterFen, move.color, move.to);
+    const enemyKingSquares = kingZoneSquares(move.afterFen, enemyColor);
+    const ownKingSquares = kingZoneSquares(move.afterFen, move.color);
+    const attackedTargets = enemyPieces
+      .filter((piece) => attackerSquares(move.afterFen, piece.square, move.color).includes(move.to))
+      .map((piece) => ({
+        square: piece.square,
+        type: piece.type,
+        value: pieceValue(piece),
+        inKingZone: enemyKingSquares.includes(piece.square)
+      }))
+      .sort((a, b) => {
+        if (b.value !== a.value) {
+          return b.value - a.value;
+        }
+        if (Number(b.inKingZone) !== Number(a.inKingZone)) {
+          return Number(b.inKingZone) - Number(a.inKingZone);
+        }
+        return squarePriority(b.square, move.color, enemyKingSquares, ownKingSquares) - squarePriority(a.square, move.color, enemyKingSquares, ownKingSquares);
+      });
+
+    const pressuredSquares = [...new Set(legalMoves.map((candidate) => candidate.to))]
+      .filter((square) => !attackedTargets.some((target) => target.square === square))
+      .filter((square) => isCenterSquare(square) || isExtendedCenterSquare(square) || enemyKingSquares.includes(square));
+
+    const defendedTargets = collectPieces(move.afterFen, move.color)
+      .filter((piece) => piece.square !== move.to)
+      .filter((piece) => attackerSquares(move.afterFen, piece.square, move.color).includes(move.to))
+      .map((piece) => ({
+        square: piece.square,
+        type: piece.type,
+        value: pieceValue(piece),
+        wasLooseBefore: features.ownLooseBefore.some((entry) => entry.square === piece.square)
+      }))
+      .sort((a, b) => (b.wasLooseBefore - a.wasLooseBefore) || (b.value - a.value));
+    const newlyDefendedTargets = defendedTargets.filter((piece) => !attackerSquares(move.beforeFen, piece.square, move.color).includes(move.from));
+
+    return {
+      attackedTargets,
+      defendedTargets,
+      newlyDefendedTargets,
+      pressuredSquares,
+      enemyKingSquares,
+      ownKingSquares
+    };
+  }
+
+  function buildPositionalFollowup(move, features, impacts) {
+    const clauses = [];
+    const movedPiece = features.movedPiece;
+
+    if (features.improvedDevelopment) {
+      if (movedPiece?.type === "n" || movedPiece?.type === "b") {
+        clauses.push(`develops the ${PIECE_NAMES[movedPiece.type] || "piece"}`);
+      } else {
+        clauses.push("improves development");
+      }
+    }
+
+    if (features.isCastling) {
+      clauses.push("gets the king safer and connects the rooks");
+    } else if (hasExplicitKingSafetyGain(move, features)) {
+      clauses.push("makes king safety easier");
+    }
+
+    if (features.centralOccupationGain > 0 && features.centralControlGain > 0) {
+      clauses.push("claims more central space");
+    } else if (features.centralOccupationGain > 0) {
+      clauses.push("puts another pawn or piece in the center");
+    } else if (features.centralControlGain > 0) {
+      const keyCenter = summarizeSquarePressure(impacts.pressuredSquares.filter((square) => isCenterSquare(square) || isExtendedCenterSquare(square)), move.color, impacts.enemyKingSquares, impacts.ownKingSquares);
+      clauses.push(keyCenter ? `adds pressure to ${keyCenter}` : "adds central pressure");
+    }
+
+    if (features.opensDiagonal) {
+      clauses.push("opens a useful diagonal for the bishop or queen");
+    }
+
+    if (features.rookActivation) {
+      clauses.push("puts the rook on a more active file");
+    }
+
+    if (features.activatedKing) {
+      clauses.push("brings the king closer to the center");
+    }
+
+    if (features.simplified && features.wasAhead) {
+      clauses.push("cuts down counterplay");
+    }
+
+    if (features.occupiesOutpost) {
+      clauses.push(`plants the ${features.movedPieceName} on a square that is hard to chase away`);
+    }
+
+    if (features.prophylacticPawnIdea) {
+      clauses.push(features.prophylacticPawnIdea);
+    }
+
+    return clauses.slice(0, 2);
+  }
+
+  function buildConcreteOpening(move, features, impacts) {
+    const attackedTarget = impacts.attackedTargets[0];
+    const defendedTarget = impacts.newlyDefendedTargets.find((target) => target.wasLooseBefore) || impacts.newlyDefendedTargets[0];
+    const pressuredSquares = summarizeSquarePressure(impacts.pressuredSquares, move.color, impacts.enemyKingSquares, impacts.ownKingSquares);
+    const pieceName = features.movedPieceName;
+
+    if (features.isCastling) {
+      return "gets the king off the center and brings the rook into play";
+    }
+
+    if (features.captureInfo?.captured) {
+      const captured = {
+        square: move.to,
+        type: features.captureInfo.captured.type
+      };
+      if (isForcedRecapture(move, features) || isNaturalRecapture(move, features)) {
+        return `recaptures ${describePieceTarget(captured, true)} and restores the balance`;
+      }
+      return `captures ${describePieceTarget(captured, true)}`;
+    }
+
+    if (features.playedForkTargets.length >= 2) {
+      return `attacks ${describeTargets(features.playedForkTargets)} at the same time`;
+    }
+
+    if (moveIsCheck(move)) {
+      return "gives check and forces an immediate response";
+    }
+
+    if (attackedTarget) {
+      const gainsTempo = !features.isCapture && attackedTarget.value >= 3;
+      return gainsTempo
+        ? `attacks ${describePieceTarget(attackedTarget, true)}, so the opponent has to respond`
+        : `attacks ${describePieceTarget(attackedTarget, true)}`;
+    }
+
+    if (defendedTarget) {
+      return `defends ${describePieceTarget(defendedTarget, true)}`;
+    }
+
+    if (features.threatResponse && features.addressesThreat) {
+      return "meets the immediate threat and keeps the position together";
+    }
+
+    if (pressuredSquares) {
+      return `adds pressure to ${pressuredSquares}`;
+    }
+
+    if (features.prophylacticPawnIdea) {
+      return features.prophylacticPawnIdea;
+    }
+
+    if (features.improvedDevelopment) {
+      return `develops the ${pieceName}`;
+    }
+
+    return "handles the position cleanly";
+  }
+
+  function buildConcretePositiveExplanation(move, features, effectiveLabel, conceptData) {
+    const played = move.san || move.moveSan || "This move";
+    const labelText = effectiveLabel.toLowerCase();
+    const impacts = analyzeConcreteImpacts(move, features);
+    const opening = buildConcreteOpening(move, features, impacts);
+    const positionalClauses = buildPositionalFollowup(move, features, impacts);
+    const drawback = buildPawnTradeoffClause(features);
+    const sentences = [`${played} is ${labelText} because it ${opening}.`];
+
+    if (positionalClauses.length) {
+      sentences.push(`It also ${joinNaturalLanguage(positionalClauses)}.`);
+    } else if (conceptData.category === "tactical_awareness") {
+      sentences.push("It creates a concrete problem the opponent has to solve right away.");
+    }
+
+    if (drawback) {
+      sentences.push(drawback);
+    }
+
+    return sentences.slice(0, 3).join(" ");
+  }
+
   function buildRoutineExplanation(move, features, effectiveLabel) {
     const played = move.san || move.moveSan || "your move";
-    const movedPiece = features.movedPiece;
-    const pieceName = movedPiece ? PIECE_NAMES[movedPiece.type] || "piece" : "piece";
+    const impacts = analyzeConcreteImpacts(move, features);
+    const defendedTarget = impacts.newlyDefendedTargets.find((target) => target.wasLooseBefore) || impacts.newlyDefendedTargets[0];
+    const pressuredSquares = summarizeSquarePressure(impacts.pressuredSquares, move.color, impacts.enemyKingSquares, impacts.ownKingSquares);
 
     if (isForcedRecapture(move, features) || isNaturalRecapture(move, features)) {
+      const captured = features.captureInfo?.captured
+        ? {
+            square: move.to,
+            type: features.captureInfo.captured.type
+          }
+        : null;
       if (isCenterSquare(move.to) || isExtendedCenterSquare(move.to)) {
-        return `${played} was ${effectiveLabel.toLowerCase()} because it was the natural recapture and kept the ${pieceName} active in the center.`;
+        return `${played} is ${effectiveLabel.toLowerCase()} because it recaptures ${captured ? describePieceTarget(captured, true) : "the material"} and keeps the piece active in the center.`;
       }
-      return `${played} was ${effectiveLabel.toLowerCase()} because it was the natural recapture and kept the position balanced.`;
+      return `${played} is ${effectiveLabel.toLowerCase()} because it is the natural recapture and restores the balance.`;
     }
 
     if (isRoutineCastlingMove(move, features)) {
-      return `${played} was ${effectiveLabel.toLowerCase()} because it was the normal castling move and kept the position sound.`;
+      return `${played} is ${effectiveLabel.toLowerCase()} because it gets the king safer and brings the rook into the game.`;
     }
 
     if (isRoutineDevelopingMove(move, features)) {
-      return `${played} was ${effectiveLabel.toLowerCase()} because it was a standard developing move that improved piece activity.`;
+      if (pressuredSquares) {
+        return `${played} is ${effectiveLabel.toLowerCase()} because it develops a piece while increasing pressure on ${pressuredSquares}.`;
+      }
+      return `${played} is ${effectiveLabel.toLowerCase()} because it develops a piece to a natural square without creating a weakness.`;
     }
 
     if (isSimpleDefensiveMove(move, features)) {
-      return `${played} was ${effectiveLabel.toLowerCase()} because it dealt with the immediate threat and kept the position under control.`;
+      if (defendedTarget) {
+        return `${played} is ${effectiveLabel.toLowerCase()} because it covers ${describePieceTarget(defendedTarget, true)} and deals with the immediate threat.`;
+      }
+      return `${played} is ${effectiveLabel.toLowerCase()} because it deals with the immediate threat and keeps the position together.`;
     }
 
     if (isOnlyReasonableMove(move, features)) {
-      return `${played} was ${effectiveLabel.toLowerCase()} because it was the normal move and kept the position sound.`;
+      return `${played} is ${effectiveLabel.toLowerCase()} because it is the clean move that keeps the position under control.`;
     }
 
-    return `${played} was ${effectiveLabel.toLowerCase()} because it was the natural move for the position.`;
+    return `${played} is ${effectiveLabel.toLowerCase()} because it is the natural move for the position.`;
   }
 
   function classifyMovePurpose(move, features) {
@@ -2274,6 +2533,30 @@
   function buildBestMoveSuggestion(bestFeatures, bestMoveSan) {
     if (!bestMoveSan) {
       return "";
+    }
+
+    if (bestFeatures?.playedForkTargets?.length >= 2) {
+      return `Better was ${bestMoveSan} because it attacked ${describeTargets(bestFeatures.playedForkTargets)} at once.`;
+    }
+
+    if (bestFeatures?.isCastling) {
+      return `Better was ${bestMoveSan} because it got the king safer and brought the rook into play.`;
+    }
+
+    if (bestFeatures?.improvedDevelopment && bestFeatures?.centralControlGain > 0) {
+      return `Better was ${bestMoveSan} because it developed a piece while adding pressure to the center.`;
+    }
+
+    if (bestFeatures?.improvedDevelopment) {
+      return `Better was ${bestMoveSan} because it developed a piece to a more active square.`;
+    }
+
+    if (bestFeatures?.centralOccupationGain > 0 || bestFeatures?.centralControlGain > 0) {
+      return `Better was ${bestMoveSan} because it challenged the center more directly.`;
+    }
+
+    if (bestFeatures?.threatResponse && bestFeatures?.addressesThreat) {
+      return `Better was ${bestMoveSan} because it dealt with the immediate threat more cleanly.`;
     }
 
     const summary = summarizeMovePurposes(classifyMovePurpose(null, bestFeatures || {}));
@@ -2449,84 +2732,61 @@
 
     let explanation = `${played} was labeled ${labelText}.`;
 
-    if (explanationMode === "routine" && isPositive) {
+    if (isPositive && explanationMode === "routine") {
       explanation = buildRoutineExplanation(move, features, effectiveLabel);
+    } else if (isPositive) {
+      explanation = buildConcretePositiveExplanation(move, features, effectiveLabel, conceptData);
     } else {
       switch (conceptData.category) {
-        case "development":
-          explanation = `${played} was ${labelText} because it ${movePurposeText}. It improved coordination without wasting time.`;
-          break;
-        case "prophylaxis":
-          explanation = `${played} was ${labelText} because it ${features.prophylacticPawnIdea || "made a useful prophylactic move"}.`;
-          break;
-        case "center_play":
-          explanation = `${played} was ${labelText} because it ${movePurposeText}. It changed the central fight right away.${pawnTradeoff ? ` ${pawnTradeoff}` : ""}`;
-          break;
-        case "tactical_awareness":
-          explanation = createsForcingMove(features)
-            ? `${played} was ${labelText} because it noticed ${conceptText || "a tactical detail"} and turned it into a forcing move.`
-            : `${played} was ${labelText} because it used a concrete tactical idea to improve the position.`;
-          break;
-        case "outpost_creation":
-          explanation = `${played} was ${labelText} because it ${movePurposeText}. That square is hard for the opponent to challenge.`;
-          break;
-        case "good_conversion":
-          explanation = `${played} was ${labelText} because it ${movePurposeText} and reduced counterplay.`;
-          break;
-        case "endgame_king_activity":
-          explanation = `${played} was ${labelText} because it ${movePurposeText}. In the endgame, an active king is a real piece.`;
-          break;
         case "hung_piece":
           if (features.immediatePunish?.isHanging) {
-            explanation = `${played} was a ${labelText} because your ${features.immediatePunish.targetPieceName} can be taken immediately by ${features.immediatePunish.cheapestAttackerName === "pawn" ? "a pawn" : `the ${features.immediatePunish.cheapestAttackerName}`}.`;
+            explanation = `${played} is a ${labelText} because your ${features.immediatePunish.targetPieceName} can be taken immediately by ${features.immediatePunish.cheapestAttackerName === "pawn" ? "a pawn" : `the ${features.immediatePunish.cheapestAttackerName}`}.`;
           } else {
-            explanation = `${played} was a ${labelText} because it left your ${features.movedPieceName} loose or underdefended.`;
+            explanation = `${played} is a ${labelText} because it leaves your ${features.movedPieceName} loose or underdefended.`;
           }
           break;
         case "missed_tactic":
-          explanation = `${played} was a ${labelText} because it missed a forcing tactical idea. ${firstSentence(bestIdea)}.`;
+          explanation = `${played} is a ${labelText} because it misses a forcing tactical idea. ${firstSentence(bestIdea)}.`;
           break;
         case "king_safety_mistake":
-          explanation = `${played} was a ${labelText} because it hurt king safety. It weakened your cover or opened lines too early.`;
+          explanation = `${played} is a ${labelText} because it weakens your king's cover or opens lines too early.`;
           break;
         case "bad_trade":
-          explanation = `${played} was a ${labelText} because the trade helped the opponent more than it helped you.`;
+          explanation = `${played} is a ${labelText} because the trade helps the opponent more than it helps you.`;
           break;
         case "structural_weakening": {
           const weakSquare = features.pawnWeakening.primaryWeakSquare;
           const outpost = features.pawnWeakening.primaryOutpost;
           const activeTarget = features.playedForkTargets[0];
           const activeIdea = activeTarget
-            ? `it was active because it attacked the ${PIECE_NAMES[activeTarget.type] || "piece"} on ${activeTarget.square}`
-            : "it had an active short-term idea";
+            ? `it attacks the ${PIECE_NAMES[activeTarget.type] || "piece"} on ${activeTarget.square}`
+            : "it has an active short-term idea";
           if (outpost) {
-            explanation = `${played} was a ${labelText} because ${activeIdea}, but it weakened ${outpost.square}. After this move, you can no longer control ${outpost.square} with a pawn, which gives the opponent a potential knight outpost there.`;
+            explanation = `${played} is a ${labelText} because ${activeIdea}, but it weakens ${outpost.square}. After this move, you can no longer control ${outpost.square} with a pawn, which gives the opponent a potential knight outpost there.`;
           } else if (weakSquare) {
-            explanation = `${played} was a ${labelText} because ${activeIdea}, but it weakened the ${weakSquare} square. After this move, that square becomes much harder to cover with a pawn and can turn into a long-term hole.`;
+            explanation = `${played} is a ${labelText} because ${activeIdea}, but it weakens the ${weakSquare} square. After this move, that square becomes much harder to cover with a pawn and can turn into a long-term hole.`;
           } else {
-            explanation = `${played} was a ${labelText} because the pawn push created a long-term structural weakness even though the move looked active at first.`;
+            explanation = `${played} is a ${labelText} because the pawn push creates a long-term structural weakness even though the move looks active at first.`;
           }
           break;
         }
         case "passive_development":
-          explanation = `${played} was a ${labelText} because it developed a piece to a passive square. It improved less than ${move.bestSan || "the best move"} and made coordination harder.`;
+          explanation = `${played} is a ${labelText} because it develops a piece to a passive square. It improves less than ${move.bestSan || "the best move"} and makes coordination harder.`;
           break;
         case "slow_opening_move":
-          explanation = `${played} was a ${labelText} because it was too slow for the opening. It did not help development, the center, or king safety.`;
+          explanation = `${played} is a ${labelText} because it is too slow for the opening. It does not help development, the center, or king safety.`;
           break;
         case "failed_conversion":
-          explanation = `${played} was a ${labelText} because it did not convert your advantage cleanly. It left extra counterplay on the board.`;
+          explanation = `${played} is a ${labelText} because it does not convert your advantage cleanly. It leaves extra counterplay on the board.`;
           break;
         case "poor_endgame_decision":
-          explanation = `${played} was a ${labelText} because it missed the main endgame priority.`;
+          explanation = `${played} is a ${labelText} because it misses the main endgame priority.`;
           break;
         default:
-          if (isPositive) {
-            explanation = `${played} was ${labelText} because it ${movePurposeText}.${pawnTradeoff ? ` ${pawnTradeoff}` : ""}`;
-          } else if (effectiveLabel === "Inaccuracy") {
-            explanation = `${played} was an inaccuracy because it was a bit too passive for the position. ${bestSuggestion}`;
+          if (effectiveLabel === "Inaccuracy") {
+            explanation = `${played} is an inaccuracy because it is a bit too passive for the position. ${bestSuggestion}`;
           } else {
-            explanation = `${played} was a ${labelText} because it did not meet the position's main demand. ${bestSuggestion}`;
+            explanation = `${played} is a ${labelText} because it does not meet the position's main demand. ${bestSuggestion}`;
           }
           break;
       }
