@@ -1,0 +1,1 @@
+importScripts("vendor-stockfish.js");

@@ -32,6 +32,148 @@
   cursor: pointer;
 }
 
+#crf-dna-launcher {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 2147483642;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 13px 18px;
+  border: 0;
+  border-radius: 999px;
+  background: #2f5f1e;
+  color: #f7f4ee;
+  font: 800 14px/1.2 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.22);
+  cursor: pointer;
+  animation: none;
+}
+
+#crf-dna-launcher::after {
+  content: "PRO";
+  margin-left: 8px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+#crf-dna-launcher:hover {
+  transform: scale(1.03);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.28);
+}
+
+.crf-dna-cta-highlight {
+  animation: crfDnaHighlight 0.7s ease-in-out 3;
+}
+
+#crf-dna-lock {
+  position: fixed;
+  top: 64px;
+  right: 20px;
+  z-index: 2147483642;
+  width: min(260px, calc(100vw - 40px));
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  background: #262421;
+  color: #f0f0f0;
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.24);
+  font: 500 12px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+#crf-dna-lock strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+#crf-dna-lock p {
+  margin: 0 0 8px;
+  color: #c8c3bc;
+}
+
+#crf-dna-lock span {
+  color: #c2a878;
+  font-weight: 700;
+}
+
+#crf-dna-lock button {
+  margin-top: 10px;
+  width: 100%;
+  border: 0;
+  border-radius: 999px;
+  padding: 10px 12px;
+  background: #81b64c;
+  color: #11130f;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+#crf-dna-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483646;
+}
+
+.crf-dna-overlay-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.crf-dna-overlay-content {
+  position: absolute;
+  top: 4vh;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(88vw, 1320px);
+  height: 90vh;
+  background: #262421;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+#crf-dna-overlay-frame {
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: #262421;
+}
+
+#crf-dna-overlay-close {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 2;
+  border: 0;
+  background: rgba(49, 46, 43, 0.92);
+  color: #f0f0f0;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+}
+
+@keyframes crfDnaPulse {
+  0% { box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18); }
+  50% { box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28); }
+  100% { box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18); }
+}
+
+@keyframes crfDnaHighlight {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+  100% { transform: scale(1); }
+}
+
 #crf-launcher:hover {
   transform: translateY(-1px);
 }
@@ -724,7 +866,7 @@ svg path {
 }
 
 .crf-hero-stat,
-.crf-focus-card,
+.crf-habit-card,
 .crf-card,
 .crf-stat,
 .crf-chart {
@@ -745,12 +887,12 @@ svg path {
   color: #f8fafc;
 }
 
-.crf-focus-card {
+.crf-habit-card {
   padding: 18px;
   border-radius: 18px;
 }
 
-.crf-focus-text {
+.crf-habit-text {
   font-size: 20px;
   font-weight: 700;
   line-height: 1.25;
@@ -862,7 +1004,9 @@ svg path {
 }
 
 #crf-launcher,
+#crf-dna-launcher,
 .crf-cta,
+#crf-dna-lock button,
 .crf-nav:not(:disabled) {
   background: var(--crf-accent);
   color: #1c1c1c;
@@ -872,16 +1016,29 @@ svg path {
 }
 
 #crf-launcher:hover,
+#crf-dna-launcher:hover,
 .crf-cta:hover,
+#crf-dna-lock button:hover,
 .crf-nav:not(:disabled):hover {
   background: var(--crf-accent-strong);
   box-shadow: none;
 }
 
+#crf-dna-launcher::after {
+  background: rgba(0, 0, 0, 0.12);
+  color: #1c1c1c;
+}
+
+.crf-dna-cta-highlight {
+  animation: none;
+}
+
+#crf-dna-lock,
+.crf-dna-overlay-content,
 .crf-header,
 .crf-hero,
 .crf-card,
-.crf-focus-card,
+.crf-habit-card,
 .crf-hero-stat,
 .crf-stat,
 .crf-chart,
@@ -903,7 +1060,7 @@ svg path {
 .crf-title,
 .crf-close,
 .crf-reason-text,
-.crf-focus-text,
+.crf-habit-text,
 .crf-hero-stat-value,
 .crf-coach-explanation,
 .crf-move-expl,
@@ -1016,4 +1173,18 @@ svg path {
 
 .crf-eval-fill {
   background: #f0f0f0;
+}
+
+.crf-dna-overlay-backdrop {
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.crf-dna-overlay-content {
+  background: var(--crf-panel);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.24);
+}
+
+#crf-dna-overlay-close {
+  background: #34312e;
+  color: var(--crf-text);
 }

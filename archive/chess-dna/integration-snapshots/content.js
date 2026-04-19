@@ -3,41 +3,7 @@
     return;
   }
 
-  function isExtensionContextValid() {
-    try {
-      return Boolean(globalThis.chrome?.runtime?.id);
-    } catch {
-      return false;
-    }
-  }
-
-  function isContextInvalidatedError(error) {
-    return /extension context invalidated/i.test(String(error?.message || error || ""));
-  }
-
-  function safeRuntimeGetURL(path) {
-    if (!isExtensionContextValid()) {
-      throw new Error("Extension context invalidated");
-    }
-
-    return chrome.runtime.getURL(path);
-  }
-
-  function runtimeSafeMessage(error, fallback = "Analysis failed.") {
-    if (isContextInvalidatedError(error) || !isExtensionContextValid()) {
-      return "The extension was reloaded. Refresh the page and run the review again.";
-    }
-
-    return error instanceof Error ? error.message : fallback;
-  }
-
-  let Chess;
-  try {
-    ({ Chess } = await import(safeRuntimeGetURL("vendor-chess.js")));
-  } catch (error) {
-    console.error("Failed to initialize Chess Review Free", error);
-    return;
-  }
+  const { Chess } = await import(chrome.runtime.getURL("vendor-chess.js"));
 
   const PANEL_ID = "crf-root";
   const LAUNCHER_ID = "crf-launcher";
@@ -46,6 +12,9 @@
   const state = {
     root: null,
     launcher: null,
+    dnaLauncher: null,
+    dnaLock: null,
+    dnaOverlay: null,
     status: null,
     progressBar: null,
     resultBadge: null,
@@ -53,8 +22,8 @@
     reasonText: null,
     blunderStat: null,
     mistakeStat: null,
-    focusLabel: null,
-    focusText: null,
+    habitLabel: null,
+    habitText: null,
     insightList: null,
     summary: null,
     moves: null,
@@ -152,106 +121,6 @@
     }
 
     return null;
-  }
-
-  function hasCompleteMoveData(move) {
-    return Boolean(
-      move &&
-      typeof move.from === "string" &&
-      typeof move.to === "string" &&
-      typeof move.beforeFen === "string" &&
-      typeof move.afterFen === "string" &&
-      typeof move.color === "string"
-    );
-  }
-
-  function emptyKingSafetySnapshot() {
-    return {
-      kingSquare: null,
-      castled: false,
-      attackers: 0,
-      legalEscapes: 0,
-      shieldMissing: 0,
-      danger: 0
-    };
-  }
-
-  function emptyMoveFeatures(move = {}) {
-    return {
-      movedPiece: null,
-      ownLooseBefore: [],
-      ownLooseAfter: [],
-      enemyLooseBefore: [],
-      movedPieceLooseAfter: null,
-      bestForkTargets: [],
-      playedForkTargets: [],
-      beforeKing: emptyKingSafetySnapshot(),
-      afterKing: emptyKingSafetySnapshot(),
-      beforeEnemyKing: emptyKingSafetySnapshot(),
-      afterEnemyKing: emptyKingSafetySnapshot(),
-      beforePawns: { pawns: [], isolated: [], doubled: [], passed: [] },
-      afterPawns: { pawns: [], isolated: [], doubled: [], passed: [] },
-      createdIsolatedPawn: false,
-      createdPassedPawn: false,
-      improvedDevelopment: false,
-      repeatedPieceInOpening: false,
-      earlyQueenOrRookMove: false,
-      flankPawnMove: false,
-      captureTradeDown: false,
-      lateMistakePattern: false,
-      captureInfo: null,
-      featuresDetected: [],
-      phase: phaseForMove(Number.isFinite(move?.moveNumber) ? move.moveNumber : 1),
-      color: move?.color || "w",
-      isEndgame: false,
-      movedPieceName: "piece",
-      beforeMaterial: 0,
-      afterMaterial: 0,
-      beforeCenter: { occupiedCore: 0, occupiedExtended: 0, attackedCore: 0, attackedExtended: 0, controlScore: 0 },
-      afterCenter: { occupiedCore: 0, occupiedExtended: 0, attackedCore: 0, attackedExtended: 0, controlScore: 0 },
-      enemyBeforeCenter: { occupiedCore: 0, occupiedExtended: 0, attackedCore: 0, attackedExtended: 0, controlScore: 0 },
-      enemyAfterCenter: { occupiedCore: 0, occupiedExtended: 0, attackedCore: 0, attackedExtended: 0, controlScore: 0 },
-      beforeDevelopment: 0,
-      afterDevelopment: 0,
-      isCastling: false,
-      isCapture: false,
-      isCheck: false,
-      isPawnBreak: false,
-      pawnWeakening: {
-        lostControlSquares: [],
-        weakSquares: [],
-        criticalWeakSquares: [],
-        outposts: [],
-        primaryWeakSquare: null,
-        primaryOutpost: null
-      },
-      createdWeakSquare: false,
-      createdCriticalWeakSquare: false,
-      createdOpponentOutpost: false,
-      occupiesOutpost: false,
-      rookActivation: false,
-      activatedKing: false,
-      simplified: false,
-      pressuredEnemyKing: false,
-      centralOccupationGain: 0,
-      centralControlGain: 0,
-      enemyCentralGain: 0,
-      gainsSpace: false,
-      threatResponse: false,
-      addressesThreat: false,
-      wasAhead: false,
-      wasBehind: false,
-      tradeQueens: false,
-      winsMaterial: false,
-      losesMaterial: false,
-      opensDiagonal: false,
-      openingSlowMove: false,
-      prophylacticPawnIdea: null,
-      blockedOwnBishop: false,
-      immediatePunish: null,
-      bestMoveImprovesDevelopmentMore: false,
-      bestMoveFeatures: null
-    };
   }
 
   function inferPlyIndexFromGameLine(fen) {
@@ -422,6 +291,32 @@
     loose_piece_punished: "You punished a loose piece immediately.",
     tactical_shot: "You found a tactical shot that changed the position.",
     passed_pawn_play: "You used a passed pawn or endgame runner well."
+  };
+
+  const HABIT_COPY = {
+    hung_piece: "Hanging pieces",
+    time_pressure: "Time pressure mistakes",
+    late_game_blunder: "Late-game blunders",
+    early_game_mistake: "Early-game mistakes",
+    opening_principle_violation: "Opening principle mistakes",
+    slow_move: "Slow moves",
+    missed_threat: "Missing threats",
+    bad_trade: "Bad trades",
+    king_safety: "King safety mistakes",
+    missed_tactic: "Missed tactics",
+    fork_tactic: "Missing forks",
+    back_rank: "Back-rank mistakes",
+    isolated_pawn: "Creating pawn weaknesses",
+    passed_pawn: "Ignoring passed pawns",
+    capitalized_blunder: "Converting advantages",
+    solid_endgame: "Solid endgames",
+    good_time_management: "Good time management",
+    strong_opening: "Strong openings",
+    strong_attack: "Attacking well",
+    good_conversion: "Good conversion",
+    loose_piece_punished: "Punishing loose pieces",
+    tactical_shot: "Tactical shots",
+    passed_pawn_play: "Passed-pawn play"
   };
 
   const PIECE_NAMES = {
@@ -1125,10 +1020,6 @@
   }
 
   function extractMoveFeatures(move, allPlayerMoves = []) {
-    if (!hasCompleteMoveData(move)) {
-      return emptyMoveFeatures(move);
-    }
-
     const movedPiece = safePieceAtFen(move.beforeFen, move.from);
     const enemyColor = oppositeColor(move.color);
     const beforeKing = kingSafetySnapshot(move.beforeFen, move.color);
@@ -1244,19 +1135,7 @@
   }
 
   function safeLabelText(move) {
-    return String(inferredMoveLabel(move) || "move").toLowerCase();
-  }
-
-  function inferredMoveLabel(move) {
-    if (move?.label) {
-      return move.label;
-    }
-
-    if (typeof move?.cpl === "number") {
-      return classifyMove(move.cpl, move.moveUci || move.uci || "", move.bestUci || "");
-    }
-
-    return "";
+    return String(move?.label || "move").toLowerCase();
   }
 
   function summarizeMovePurposes(purposes) {
@@ -1268,7 +1147,6 @@
     const hasCenter = list.includes("occupy the center") || list.includes("contest the center");
     const hasDevelopment = list.includes("develop a piece");
     const hasKingSafety = list.includes("improve king safety");
-    const hasTempo = list.includes("attack a piece");
     const hasSimplify = list.includes("simplify") || list.includes("trade queens") || list.includes("trade pieces");
     const hasPassedPawn = list.includes("create a passed pawn");
     const hasAttack = list.includes("attack king");
@@ -1283,12 +1161,6 @@
     }
     if (hasKingSafety && hasDevelopment) {
       return "developed and made king safety easier";
-    }
-    if (hasCenter && hasTempo) {
-      return "fought for the center and attacked a piece";
-    }
-    if (hasTempo) {
-      return "attacked a piece and gained a tempo";
     }
     if (hasKingSafety) {
       return "improved king safety";
@@ -1325,10 +1197,8 @@
   }
 
   function buildCoachPanelCopy(move) {
-    const readableMove = move?.san || move?.moveSan || "this move";
-    const explanation = firstSentence(move.explanation || `${readableMove} was labeled ${safeLabelText(move)}.`);
-    const effectiveLabel = inferredMoveLabel(move);
-    const showAlternative = effectiveLabel === "Good" || effectiveLabel === "Inaccuracy";
+    const explanation = firstSentence(move.explanation || `${move.san || "Move"} was labeled ${safeLabelText(move)}.`);
+    const showAlternative = move.label === "Good" || move.label === "Inaccuracy";
     const followup = showAlternative
       ? firstSentence(move.alternative || move.whatChanged || "")
       : move.moveNumber <= 10
@@ -1341,18 +1211,6 @@
         : "Tip: ";
 
     return [explanation, followup ? `${followupPrefix}${followup}` : ""].filter(Boolean).join(" ");
-  }
-
-  function movePrefixLabel(move) {
-    const san = move?.san || move?.moveSan || "this move";
-    const hasNumber = Number.isFinite(move?.moveNumber);
-    const hasColor = move?.color === "w" || move?.color === "b";
-
-    if (hasNumber && hasColor) {
-      return move.color === "w" ? `${move.moveNumber}. ${san}` : `${move.moveNumber}... ${san}`;
-    }
-
-    return san;
   }
 
   function sumMaterialForColor(fen, color) {
@@ -1412,10 +1270,6 @@
       return false;
     }
 
-    if (move.san?.includes("x")) {
-      return false;
-    }
-
     const enemyPawns = collectPieces(move.beforeFen, oppositeColor(move.color), "p");
     const toFile = squareFileIndex(move.to);
     const toRank = squareRankIndex(move.to);
@@ -1426,80 +1280,6 @@
     });
 
     return ["c", "d", "e", "f"].includes(move.from[0]) && (directContact || isCenterSquare(move.to) || isExtendedCenterSquare(move.to));
-  }
-
-  function clearDiagonalSquares(fromSquare, toSquare) {
-    const fromFile = squareFileIndex(fromSquare);
-    const toFile = squareFileIndex(toSquare);
-    const fromRank = squareRankIndex(fromSquare);
-    const toRank = squareRankIndex(toSquare);
-    const fileStep = Math.sign(toFile - fromFile);
-    const rankStep = Math.sign(toRank - fromRank);
-
-    if (!fileStep || !rankStep || Math.abs(toFile - fromFile) !== Math.abs(toRank - fromRank)) {
-      return [];
-    }
-
-    const squares = [];
-    let file = fromFile + fileStep;
-    let rank = fromRank + rankStep;
-
-    while (file !== toFile && rank !== toRank) {
-      squares.push(`${String.fromCharCode(97 + file)}${rank}`);
-      file += fileStep;
-      rank += rankStep;
-    }
-
-    return squares;
-  }
-
-  function diagonalPressureFromSquare(fen, color, fromSquare, pieceTypes = ["b", "q"]) {
-    const pieces = collectPieces(fen, color)
-      .filter((piece) => pieceTypes.includes(piece.type) && piece.square !== fromSquare);
-
-    for (const piece of pieces) {
-      const between = clearDiagonalSquares(piece.square, fromSquare);
-      if (!between.length) {
-        continue;
-      }
-
-      const blockedBefore = between.some((square) => safePieceAtFen(fen, square));
-      if (!blockedBefore) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  function detectMeaningfulOpenDiagonal(move, movedPiece) {
-    if (!movedPiece || movedPiece.type !== "p") {
-      return false;
-    }
-
-    const beforePressure = diagonalPressureFromSquare(move.beforeFen, move.color, move.from);
-    const afterPressure = diagonalPressureFromSquare(move.afterFen, move.color, move.from);
-    return beforePressure && !afterPressure;
-  }
-
-  function createsForcingMove(features) {
-    if (!features) {
-      return false;
-    }
-
-    if (features.isCheck) {
-      return true;
-    }
-
-    if (features.immediatePunish?.isHanging) {
-      return true;
-    }
-
-    if ((features.playedForkTargets || []).length >= 2) {
-      return true;
-    }
-
-    return Boolean(features.pressuredEnemyKing && features.afterEnemyKing.attackers > features.beforeEnemyKing.attackers);
   }
 
   function squaresControlledByPawn(square, color) {
@@ -1739,150 +1519,6 @@
     return null;
   }
 
-  function isOpeningMove(moveNumber, positionBefore) {
-    if (moveNumber <= 1) {
-      return true;
-    }
-
-    try {
-      const occupied = collectPieces(positionBefore, "w").length + collectPieces(positionBefore, "b").length;
-      const developedWhite = countDevelopedMinorPieces(positionBefore, "w");
-      const developedBlack = countDevelopedMinorPieces(positionBefore, "b");
-      return moveNumber <= 4 || (occupied >= 28 && developedWhite + developedBlack <= 4);
-    } catch {
-      return moveNumber <= 4;
-    }
-  }
-
-  function isCapture(move) {
-    return Boolean(move?.san?.includes("x") || move?.captureInfo?.captured || move?.capturedPiece);
-  }
-
-  function isRecapture(move, previousMove, positionBefore, positionAfter) {
-    if (!isCapture(move) || !previousMove?.wasCapture || !move?.to || !previousMove?.to) {
-      return false;
-    }
-
-    if (move.to !== previousMove.to) {
-      return false;
-    }
-
-    const beforeMaterial = materialBalanceForColor(positionBefore, move.color);
-    const afterMaterial = materialBalanceForColor(positionAfter, move.color);
-    return afterMaterial >= beforeMaterial;
-  }
-
-  function isThreatResponse(move, positionBefore) {
-    if (!move || isOpeningMove(move.moveNumber, positionBefore) || !move.previousMoveMeta) {
-      return false;
-    }
-
-    const ownLooseBefore = countLoosePieces(positionBefore, move.color).length;
-    const kingBefore = kingSafetySnapshot(positionBefore, move.color);
-    const previousWasForcing = Boolean(move.previousMoveMeta.wasCheck || move.previousMoveMeta.wasCapture);
-
-    return previousWasForcing && (ownLooseBefore > 0 || kingBefore.attackers > 0 || kingBefore.danger >= 4);
-  }
-
-  function isForcedRecapture(move, features) {
-    if (!features?.captureInfo?.captured || !move?.to) {
-      return false;
-    }
-
-    if (move.bestUci && move.moveUci && move.bestUci !== move.moveUci && move.bestUci !== move.uci) {
-      return false;
-    }
-    const noFreshTactic = (features.playedForkTargets || []).length < 2;
-
-    return isRecapture(move, move.previousMoveMeta, move.beforeFen, move.afterFen) && noFreshTactic;
-  }
-
-  function isNaturalRecapture(move, features) {
-    if (!features?.captureInfo?.captured || !isRecapture(move, move.previousMoveMeta, move.beforeFen, move.afterFen)) {
-      return false;
-    }
-
-    const movedPieceValue = pieceValue(features.movedPiece);
-    const capturedValue = pieceValue(features.captureInfo.captured);
-    const centralRecapture = isCenterSquare(move.to) || isExtendedCenterSquare(move.to);
-    const noBigSwing = (move.cpl || 0) <= 35;
-    const noNewStory = !features.createdCriticalWeakSquare && !features.createdOpponentOutpost && (features.playedForkTargets || []).length < 2;
-
-    return noBigSwing && noNewStory && (centralRecapture || capturedValue >= movedPieceValue - 1);
-  }
-
-  function isOnlyReasonableMove(move, features) {
-    if (!move?.bestUci) {
-      return false;
-    }
-
-    const playedUci = move.moveUci || move.uci || "";
-    const bestMatches = playedUci && playedUci === move.bestUci;
-    const urgentDefense = features.addressesThreat && (features.ownLooseBefore.length > 0 || features.beforeKing.attackers > 0);
-
-    return bestMatches && urgentDefense && (move.cpl || 0) <= 20;
-  }
-
-  function isRoutineDevelopingMove(move, features) {
-    const movedPiece = features?.movedPiece;
-    if (!movedPiece || !["n", "b"].includes(movedPiece.type)) {
-      return false;
-    }
-
-    const standardOpeningMove = move.moveNumber <= 10 &&
-      features.improvedDevelopment &&
-      !isCapture(move) &&
-      !features.createdCriticalWeakSquare &&
-      !features.createdOpponentOutpost &&
-      !features.prophylacticPawnIdea &&
-      (features.playedForkTargets || []).length < 2 &&
-      (move.cpl || 0) <= 35;
-
-    return standardOpeningMove;
-  }
-
-  function isRoutineCastlingMove(move, features) {
-    return features?.isCastling && !features.pressuredEnemyKing && !features.createdCriticalWeakSquare && (move.cpl || 0) <= 35;
-  }
-
-  function isSimpleDefensiveMove(move, features) {
-    const simpleDefense = isThreatResponse(move, move.beforeFen) &&
-      !isCapture(move) &&
-      !features.pressuredEnemyKing &&
-      !features.createdCriticalWeakSquare &&
-      !features.createdOpponentOutpost &&
-      (features.playedForkTargets || []).length < 2 &&
-      (move.cpl || 0) <= 45;
-
-    return simpleDefense;
-  }
-
-  function classifyExplanationMode(move, features, conceptData) {
-    const label = inferredMoveLabel(move) || "";
-    const criticalLabels = ["Blunder", "Mistake"];
-
-    if (
-      criticalLabels.includes(label) ||
-      ["hung_piece", "missed_tactic", "king_safety_mistake", "bad_trade", "failed_conversion", "structural_weakening"].includes(conceptData.category) ||
-      (move.cpl || 0) >= 120
-    ) {
-      return "critical";
-    }
-
-    if (
-      isForcedRecapture(move, features) ||
-      isNaturalRecapture(move, features) ||
-      isOnlyReasonableMove(move, features) ||
-      isRoutineDevelopingMove(move, features) ||
-      isRoutineCastlingMove(move, features) ||
-      isSimpleDefensiveMove(move, features)
-    ) {
-      return "routine";
-    }
-
-    return "strategic";
-  }
-
   function blocksHomeBishop(beforeFen, color, from, to, pieceType) {
     if (pieceType !== "n") {
       return false;
@@ -1905,10 +1541,6 @@
   }
 
   function extractBoardFeatures(move, allPlayerMoves = [], includeBestComparison = true) {
-    if (!hasCompleteMoveData(move)) {
-      return emptyMoveFeatures(move);
-    }
-
     const base = extractMoveFeatures(move, allPlayerMoves);
     const movedPiece = base.movedPiece || safePieceAtFen(move.beforeFen, move.from);
     const phase = phaseForMove(move.moveNumber);
@@ -1930,28 +1562,30 @@
     const rookActivation = movedPiece?.type === "r" && detectRookActivation(move.afterFen, move.color, move.to);
     const activatedKing = Boolean(isEndgame && movedPiece?.type === "k" && isExtendedCenterSquare(move.to));
     const simplified = totalMaterialOnBoard(move.afterFen) < totalMaterialOnBoard(move.beforeFen);
+    const improvedKingSafety =
+      isCastling ||
+      (movedPiece?.type === "k" && base.afterKing.danger < base.beforeKing.danger) ||
+      (isKingPawnMove(move, move.color) && base.afterKing.danger < base.beforeKing.danger);
     const pressuredEnemyKing = base.afterEnemyKing.danger > base.beforeEnemyKing.danger;
     const centralOccupationGain = afterCenter.occupiedCore - beforeCenter.occupiedCore;
     const centralControlGain = afterCenter.controlScore - beforeCenter.controlScore;
     const enemyCentralGain = enemyAfterCenter.controlScore - enemyBeforeCenter.controlScore;
     const gainsSpace = afterCenter.occupiedExtended > beforeCenter.occupiedExtended;
-    const threatResponse = isThreatResponse(move, move.beforeFen);
-    const addressesThreat = threatResponse && (base.ownLooseAfter.length < base.ownLooseBefore.length || base.afterKing.danger < base.beforeKing.danger);
+    const addressesThreat = base.ownLooseAfter.length < base.ownLooseBefore.length || base.afterKing.danger < base.beforeKing.danger;
     const wasAhead = beforeMaterial >= 1.5;
     const wasBehind = beforeMaterial <= -1.5;
     const tradeQueens = Boolean(base.captureInfo?.captured?.type === "q" && movedPiece?.type === "q");
     const winsMaterial = afterMaterial > beforeMaterial + 0.5;
     const losesMaterial = afterMaterial < beforeMaterial - 0.5;
-    const opensDiagonal = detectMeaningfulOpenDiagonal(move, movedPiece);
+    const opensDiagonal = Boolean(
+      movedPiece?.type === "p" &&
+      ["c", "d", "e", "f"].includes(move.from[0]) &&
+      (move.from[0] !== move.to[0] || movedPiece.type === "p")
+    );
     const openingSlowMove = Boolean(
       phase === "opening" &&
       !base.improvedDevelopment &&
-      !hasExplicitKingSafetyGain(move, {
-        ...base,
-        color: move.color,
-        isCastling,
-        movedPiece
-      }) &&
+      !improvedKingSafety &&
       centralOccupationGain <= 0 &&
       centralControlGain <= 0 &&
       (base.flankPawnMove || base.repeatedPieceInOpening || base.earlyQueenOrRookMove)
@@ -1974,7 +1608,6 @@
     const features = {
       ...base,
       phase,
-      color: move.color,
       isEndgame,
       movedPiece,
       movedPieceName: movedPiece ? PIECE_NAMES[movedPiece.type] || "piece" : "piece",
@@ -1998,12 +1631,12 @@
       rookActivation,
       activatedKing,
       simplified,
+      improvedKingSafety,
       pressuredEnemyKing,
       centralOccupationGain,
       centralControlGain,
       enemyCentralGain,
       gainsSpace,
-      threatResponse,
       addressesThreat,
       wasAhead,
       wasBehind,
@@ -2037,111 +1670,15 @@
     return features;
   }
 
-  function hasExplicitKingSafetyGain(move, features) {
-    if (!features?.beforeKing || !features?.afterKing) {
-      return false;
-    }
-
-    const color = move?.color || features.color;
-    if (features.isCastling) {
-      return true;
-    }
-
-    const underPressure = features.beforeKing.attackers > 0 || features.beforeKing.danger >= 4;
-    const dangerDrop = features.beforeKing.danger - features.afterKing.danger;
-    const attackersReduced = features.afterKing.attackers < features.beforeKing.attackers;
-    const kingMoveToSaferSquare = features.movedPiece?.type === "k" && (attackersReduced || dangerDrop >= 1);
-    const kingSidePawnBlock = features.movedPiece?.type === "p" &&
-      isKingPawnMove(move, color) &&
-      underPressure &&
-      (attackersReduced || dangerDrop >= 2);
-
-    return underPressure && (kingMoveToSaferSquare || kingSidePawnBlock);
-  }
-
-  function hasExplicitKingSafetyLoss(move, features) {
-    if (!features?.beforeKing || !features?.afterKing) {
-      return false;
-    }
-
-    const color = move?.color || features.color;
-    if (features.afterKing.danger > features.beforeKing.danger + 1) {
-      return true;
-    }
-
-    const castledAndLoosenedShield = features.beforeKing.castled &&
-      features.movedPiece?.type === "p" &&
-      isKingPawnMove(move, color) &&
-      features.afterKing.shieldMissing > features.beforeKing.shieldMissing;
-    const invitedPressure = features.afterKing.attackers > features.beforeKing.attackers || features.afterKing.danger > features.beforeKing.danger;
-
-    return castledAndLoosenedShield && invitedPressure;
-  }
-
-  function buildPawnTradeoffClause(features) {
-    if (features.movedPiece?.type !== "p" || (!features.createdCriticalWeakSquare && !features.createdOpponentOutpost)) {
-      return "";
-    }
-
-    const outpost = features.pawnWeakening.primaryOutpost;
-    const weakSquare = features.pawnWeakening.primaryWeakSquare;
-
-    if (outpost) {
-      return `It also weakened ${outpost.square}, which can become a knight outpost for the opponent later.`;
-    }
-    if (weakSquare) {
-      return `It also weakened ${weakSquare}, so that square becomes harder to cover with a pawn later on.`;
-    }
-
-    return "";
-  }
-
-  function buildRoutineExplanation(move, features, effectiveLabel) {
-    const played = move.san || move.moveSan || "your move";
-    const movedPiece = features.movedPiece;
-    const pieceName = movedPiece ? PIECE_NAMES[movedPiece.type] || "piece" : "piece";
-
-    if (isForcedRecapture(move, features) || isNaturalRecapture(move, features)) {
-      if (isCenterSquare(move.to) || isExtendedCenterSquare(move.to)) {
-        return `${played} was ${effectiveLabel.toLowerCase()} because it was the natural recapture and kept the ${pieceName} active in the center.`;
-      }
-      return `${played} was ${effectiveLabel.toLowerCase()} because it was the natural recapture and kept the position balanced.`;
-    }
-
-    if (isRoutineCastlingMove(move, features)) {
-      return `${played} was ${effectiveLabel.toLowerCase()} because it was the normal castling move and kept the position sound.`;
-    }
-
-    if (isRoutineDevelopingMove(move, features)) {
-      return `${played} was ${effectiveLabel.toLowerCase()} because it was a standard developing move that improved piece activity.`;
-    }
-
-    if (isSimpleDefensiveMove(move, features)) {
-      return `${played} was ${effectiveLabel.toLowerCase()} because it dealt with the immediate threat and kept the position under control.`;
-    }
-
-    if (isOnlyReasonableMove(move, features)) {
-      return `${played} was ${effectiveLabel.toLowerCase()} because it was the normal move and kept the position sound.`;
-    }
-
-    return `${played} was ${effectiveLabel.toLowerCase()} because it was the natural move for the position.`;
-  }
-
-  function classifyMovePurpose(move, features) {
-    if (!features) {
-      return [];
-    }
-
+  function classifyMovePurpose(features) {
     const purposes = [];
-    const playedForkTargets = features.playedForkTargets || [];
 
     if (features.improvedDevelopment) pushUnique(purposes, "develop a piece");
-    if (hasExplicitKingSafetyGain(move, features)) pushUnique(purposes, "improve king safety");
+    if (features.beforeKing.danger > features.afterKing.danger || features.isCastling) pushUnique(purposes, "improve king safety");
     if (features.centralOccupationGain > 0) pushUnique(purposes, "occupy the center");
     if (features.centralControlGain > 0) pushUnique(purposes, "contest the center");
     if (features.gainsSpace) pushUnique(purposes, "gain space");
-    if (playedForkTargets.length) pushUnique(purposes, "attack a piece");
-    if (features.threatResponse && features.addressesThreat) pushUnique(purposes, "stop a threat");
+    if (features.addressesThreat) pushUnique(purposes, "stop a threat");
     if (features.isPawnBreak) pushUnique(purposes, "execute a pawn break");
     if (features.opensDiagonal) pushUnique(purposes, "open a diagonal");
     if (features.pressuredEnemyKing) pushUnique(purposes, "attack king");
@@ -2173,7 +1710,7 @@
       if (features.centralControlGain > 0) pushUnique(concepts, "control of the center");
       if (features.gainsSpace) pushUnique(concepts, "space advantage");
       if (features.isCastling) pushUnique(concepts, "castling");
-      if (hasExplicitKingSafetyGain(move, features)) pushUnique(concepts, features.isCastling ? "castled king safety" : "king safety");
+      if (features.improvedKingSafety) pushUnique(concepts, "castled king safety");
       if (features.isPawnBreak) pushUnique(concepts, features.phase === "opening" ? "pawn break" : "central break");
       if (features.opensDiagonal) pushUnique(concepts, "open diagonal");
       if (features.occupiesOutpost) pushUnique(concepts, "outpost");
@@ -2182,7 +1719,7 @@
       if (features.simplified && features.wasAhead) pushUnique(concepts, "safe simplification");
       if (features.simplified && features.wasAhead) pushUnique(concepts, "converting material advantage");
       if (features.pressuredEnemyKing) pushUnique(concepts, "attacking chances against king");
-      if (createsForcingMove(features)) pushUnique(concepts, "tactical shot");
+      if (features.playedForkTargets.length >= 2 || features.winsMaterial) pushUnique(concepts, "tactical shot");
       if (features.prophylacticPawnIdea) pushUnique(concepts, "prophylaxis");
     } else {
       if (features.createdCriticalWeakSquare) {
@@ -2221,7 +1758,7 @@
         category = "hung_piece";
       } else if (features.bestForkTargets.length >= 2 && features.playedForkTargets.length < 2) {
         category = "missed_tactic";
-      } else if (hasExplicitKingSafetyLoss(move, features)) {
+      } else if (features.afterKing.danger > features.beforeKing.danger + 1 || isKingPawnMove(move, move.color)) {
         category = "king_safety_mistake";
       } else if (features.captureTradeDown) {
         category = "bad_trade";
@@ -2236,7 +1773,7 @@
       } else if (features.isEndgame && features.movedPiece?.type !== "k" && !features.activatedKing && features.label !== "Inaccuracy") {
         category = "poor_endgame_decision";
       }
-    } else if (createsForcingMove(features)) {
+    } else if (features.bestForkTargets.length >= 2 || features.playedForkTargets.length >= 2 || features.winsMaterial) {
       category = "tactical_awareness";
     } else if (features.prophylacticPawnIdea) {
       category = "prophylaxis";
@@ -2263,7 +1800,7 @@
       return bestMoveSan || "the engine move";
     }
 
-    const ideas = classifyMovePurpose(null, bestFeatures);
+    const ideas = classifyMovePurpose(bestFeatures);
     if (!ideas.length) {
       return bestMoveSan || "the engine move";
     }
@@ -2276,7 +1813,7 @@
       return "";
     }
 
-    const summary = summarizeMovePurposes(classifyMovePurpose(null, bestFeatures || {}));
+    const summary = summarizeMovePurposes(classifyMovePurpose(bestFeatures || {}));
     if (!summary || summary === "improved the position") {
       return `Better was ${bestMoveSan} because it handled the position more directly.`;
     }
@@ -2295,7 +1832,7 @@
       return `Better was ${bestMoveSan} because it handled the position without conceding ${weakSquare || "a long-term square"}.`;
     }
 
-    const summary = summarizeMovePurposes(classifyMovePurpose(null, features.bestMoveFeatures || {}));
+    const summary = summarizeMovePurposes(classifyMovePurpose(features.bestMoveFeatures || {}));
     if (!weakSquare) {
       return `Better was ${bestMoveSan} because it ${summary}.`;
     }
@@ -2306,19 +1843,18 @@
   function evaluateMoveConsequences(move, features, conceptData) {
     const piece = features.movedPieceName;
     const bestIdea = describeBestMoveIdea(features.bestMoveFeatures, move.bestSan || move.bestUci || "the engine move");
-    const playedMove = move.san || move.moveSan || "this move";
 
     switch (conceptData.category) {
       case "hung_piece":
         if (features.immediatePunish?.isHanging) {
           return {
-            whatChanged: `After ${playedMove}, your ${features.immediatePunish.targetPieceName} on ${features.immediatePunish.targetSquare} could be taken by ${features.immediatePunish.cheapestAttackerName === "pawn" ? "a pawn" : `the ${features.immediatePunish.cheapestAttackerName}`} from ${features.immediatePunish.cheapestAttackerSquare}.`,
+            whatChanged: `After ${move.san}, your ${features.immediatePunish.targetPieceName} on ${features.immediatePunish.targetSquare} could be taken by ${features.immediatePunish.cheapestAttackerName === "pawn" ? "a pawn" : `the ${features.immediatePunish.cheapestAttackerName}`} from ${features.immediatePunish.cheapestAttackerSquare}.`,
             lesson: "If a more valuable piece can be captured immediately by a cheaper one, that usually decides the position on the spot.",
             advice: `Before every capture, check what attacks ${move.to} after your piece lands there.`
           };
         }
         return {
-          whatChanged: `After ${playedMove}, your ${piece} on ${move.to} was defended fewer times than it could be attacked, so it became an immediate tactical target.`,
+          whatChanged: `After ${move.san}, your ${piece} on ${move.to} was defended fewer times than it could be attacked, so it became an immediate tactical target.`,
           lesson: "Loose pieces and underdefended pieces are often the first thing tactics punish.",
           advice: "Before you play an active move, count attackers and defenders on the piece you move and on the pieces it stops protecting."
         };
@@ -2431,114 +1967,103 @@
 
   function generateCoachExplanation(move, allPlayerMoves = []) {
     const features = extractBoardFeatures(move, allPlayerMoves);
-    const movePurpose = classifyMovePurpose(move, features);
+    const movePurpose = classifyMovePurpose(features);
     const conceptData = detectConcepts(move, features);
-    const explanationMode = classifyExplanationMode(move, features, conceptData);
     const consequences = evaluateMoveConsequences(move, features, conceptData);
-    const effectiveLabel = inferredMoveLabel(move) || "Move";
-    const isPositive = ["Best", "Excellent", "Good"].includes(effectiveLabel);
+    const isPositive = ["Best", "Excellent", "Good"].includes(move.label);
     const played = move.san || move.moveSan || "your move";
-    const labelText = effectiveLabel.toLowerCase();
+    const labelText = (move.label || "move").toLowerCase();
     const movePurposeText = summarizeMovePurposes(movePurpose);
     const conceptText = joinNaturalLanguage(conceptData.mainConcepts.slice(0, 3));
     const bestIdea = describeBestMoveIdea(features.bestMoveFeatures, move.bestSan || move.bestUci || "the engine move");
-    const pawnTradeoff = buildPawnTradeoffClause(features);
     const bestSuggestion = conceptData.category === "structural_weakening"
       ? buildStructuralBestMoveSuggestion(move, features)
       : buildBestMoveSuggestion(features.bestMoveFeatures, move.bestSan || move.bestUci || "");
 
     let explanation = `${played} was labeled ${labelText}.`;
 
-    if (explanationMode === "routine" && isPositive) {
-      explanation = buildRoutineExplanation(move, features, effectiveLabel);
-    } else {
-      switch (conceptData.category) {
-        case "development":
-          explanation = `${played} was ${labelText} because it ${movePurposeText}. It improved coordination without wasting time.`;
-          break;
-        case "prophylaxis":
-          explanation = `${played} was ${labelText} because it ${features.prophylacticPawnIdea || "made a useful prophylactic move"}.`;
-          break;
-        case "center_play":
-          explanation = `${played} was ${labelText} because it ${movePurposeText}. It changed the central fight right away.${pawnTradeoff ? ` ${pawnTradeoff}` : ""}`;
-          break;
-        case "tactical_awareness":
-          explanation = createsForcingMove(features)
-            ? `${played} was ${labelText} because it noticed ${conceptText || "a tactical detail"} and turned it into a forcing move.`
-            : `${played} was ${labelText} because it used a concrete tactical idea to improve the position.`;
-          break;
-        case "outpost_creation":
-          explanation = `${played} was ${labelText} because it ${movePurposeText}. That square is hard for the opponent to challenge.`;
-          break;
-        case "good_conversion":
-          explanation = `${played} was ${labelText} because it ${movePurposeText} and reduced counterplay.`;
-          break;
-        case "endgame_king_activity":
-          explanation = `${played} was ${labelText} because it ${movePurposeText}. In the endgame, an active king is a real piece.`;
-          break;
-        case "hung_piece":
-          if (features.immediatePunish?.isHanging) {
-            explanation = `${played} was a ${labelText} because your ${features.immediatePunish.targetPieceName} can be taken immediately by ${features.immediatePunish.cheapestAttackerName === "pawn" ? "a pawn" : `the ${features.immediatePunish.cheapestAttackerName}`}.`;
-          } else {
-            explanation = `${played} was a ${labelText} because it left your ${features.movedPieceName} loose or underdefended.`;
-          }
-          break;
-        case "missed_tactic":
-          explanation = `${played} was a ${labelText} because it missed a forcing tactical idea. ${firstSentence(bestIdea)}.`;
-          break;
-        case "king_safety_mistake":
-          explanation = `${played} was a ${labelText} because it hurt king safety. It weakened your cover or opened lines too early.`;
-          break;
-        case "bad_trade":
-          explanation = `${played} was a ${labelText} because the trade helped the opponent more than it helped you.`;
-          break;
-        case "structural_weakening": {
-          const weakSquare = features.pawnWeakening.primaryWeakSquare;
-          const outpost = features.pawnWeakening.primaryOutpost;
-          const activeTarget = features.playedForkTargets[0];
-          const activeIdea = activeTarget
-            ? `it was active because it attacked the ${PIECE_NAMES[activeTarget.type] || "piece"} on ${activeTarget.square}`
-            : "it had an active short-term idea";
-          if (outpost) {
-            explanation = `${played} was a ${labelText} because ${activeIdea}, but it weakened ${outpost.square}. After this move, you can no longer control ${outpost.square} with a pawn, which gives the opponent a potential knight outpost there.`;
-          } else if (weakSquare) {
-            explanation = `${played} was a ${labelText} because ${activeIdea}, but it weakened the ${weakSquare} square. After this move, that square becomes much harder to cover with a pawn and can turn into a long-term hole.`;
-          } else {
-            explanation = `${played} was a ${labelText} because the pawn push created a long-term structural weakness even though the move looked active at first.`;
-          }
-          break;
+    switch (conceptData.category) {
+      case "development":
+        explanation = `${played} was ${labelText} because it ${movePurposeText}. It improved coordination without wasting time.`;
+        break;
+      case "prophylaxis":
+        explanation = `${played} was ${labelText} because it ${features.prophylacticPawnIdea || "made a useful prophylactic move"}.`;
+        break;
+      case "center_play":
+        explanation = `${played} was ${labelText} because it ${movePurposeText}. It changed the central fight right away.`;
+        break;
+      case "tactical_awareness":
+        explanation = `${played} was ${labelText} because it noticed ${conceptText || "a tactical detail"} and turned it into a forcing move.`;
+        break;
+      case "outpost_creation":
+        explanation = `${played} was ${labelText} because it ${movePurposeText}. That square is hard for the opponent to challenge.`;
+        break;
+      case "good_conversion":
+        explanation = `${played} was ${labelText} because it ${movePurposeText} and reduced counterplay.`;
+        break;
+      case "endgame_king_activity":
+        explanation = `${played} was ${labelText} because it ${movePurposeText}. In the endgame, an active king is a real piece.`;
+        break;
+      case "hung_piece":
+        if (features.immediatePunish?.isHanging) {
+          explanation = `${played} was a ${labelText} because your ${features.immediatePunish.targetPieceName} can be taken immediately by ${features.immediatePunish.cheapestAttackerName === "pawn" ? "a pawn" : `the ${features.immediatePunish.cheapestAttackerName}`}.`;
+        } else {
+          explanation = `${played} was a ${labelText} because it left your ${features.movedPieceName} loose or underdefended.`;
         }
-        case "passive_development":
-          explanation = `${played} was a ${labelText} because it developed a piece to a passive square. It improved less than ${move.bestSan || "the best move"} and made coordination harder.`;
-          break;
-        case "slow_opening_move":
-          explanation = `${played} was a ${labelText} because it was too slow for the opening. It did not help development, the center, or king safety.`;
-          break;
-        case "failed_conversion":
-          explanation = `${played} was a ${labelText} because it did not convert your advantage cleanly. It left extra counterplay on the board.`;
-          break;
-        case "poor_endgame_decision":
-          explanation = `${played} was a ${labelText} because it missed the main endgame priority.`;
-          break;
-        default:
-          if (isPositive) {
-            explanation = `${played} was ${labelText} because it ${movePurposeText}.${pawnTradeoff ? ` ${pawnTradeoff}` : ""}`;
-          } else if (effectiveLabel === "Inaccuracy") {
-            explanation = `${played} was an inaccuracy because it was a bit too passive for the position. ${bestSuggestion}`;
-          } else {
-            explanation = `${played} was a ${labelText} because it did not meet the position's main demand. ${bestSuggestion}`;
-          }
-          break;
+        break;
+      case "missed_tactic":
+        explanation = `${played} was a ${labelText} because it missed a forcing tactical idea. ${firstSentence(bestIdea)}.`;
+        break;
+      case "king_safety_mistake":
+        explanation = `${played} was a ${labelText} because it hurt king safety. It weakened your cover or opened lines too early.`;
+        break;
+      case "bad_trade":
+        explanation = `${played} was a ${labelText} because the trade helped the opponent more than it helped you.`;
+        break;
+      case "structural_weakening": {
+        const weakSquare = features.pawnWeakening.primaryWeakSquare;
+        const outpost = features.pawnWeakening.primaryOutpost;
+        const activeTarget = features.playedForkTargets[0];
+        const activeIdea = activeTarget
+          ? `it was active because it attacked the ${PIECE_NAMES[activeTarget.type] || "piece"} on ${activeTarget.square}`
+          : "it had an active short-term idea";
+        if (outpost) {
+          explanation = `${played} was a ${labelText} because ${activeIdea}, but it weakened ${outpost.square}. After this move, you can no longer control ${outpost.square} with a pawn, which gives the opponent a potential knight outpost there.`;
+        } else if (weakSquare) {
+          explanation = `${played} was a ${labelText} because ${activeIdea}, but it weakened the ${weakSquare} square. After this move, that square becomes much harder to cover with a pawn and can turn into a long-term hole.`;
+        } else {
+          explanation = `${played} was a ${labelText} because the pawn push created a long-term structural weakness even though the move looked active at first.`;
+        }
+        break;
       }
+      case "passive_development":
+        explanation = `${played} was a ${labelText} because it developed a piece to a passive square. It improved less than ${move.bestSan || "the best move"} and made coordination harder.`;
+        break;
+      case "slow_opening_move":
+        explanation = `${played} was a ${labelText} because it was too slow for the opening. It did not help development, the center, or king safety.`;
+        break;
+      case "failed_conversion":
+        explanation = `${played} was a ${labelText} because it did not convert your advantage cleanly. It left extra counterplay on the board.`;
+        break;
+      case "poor_endgame_decision":
+        explanation = `${played} was a ${labelText} because it missed the main endgame priority.`;
+        break;
+      default:
+        if (isPositive) {
+          explanation = `${played} was ${labelText} because it ${movePurposeText}.`;
+        } else if (move.label === "Inaccuracy") {
+          explanation = `${played} was an inaccuracy because it was a bit too passive for the position. ${bestSuggestion}`;
+        } else {
+          explanation = `${played} was a ${labelText} because it did not meet the position's main demand. ${bestSuggestion}`;
+        }
+        break;
     }
 
-    if (!isPositive && effectiveLabel === "Inaccuracy" && !explanation.includes("Better was")) {
+    if (!isPositive && move.label === "Inaccuracy" && !explanation.includes("Better was")) {
       explanation = `${firstSentence(explanation)} ${bestSuggestion}`.trim();
     }
 
     return {
-      label: effectiveLabel,
-      explanationMode,
       moveNumber: move.moveNumber,
       playedMove: played,
       bestMove: move.bestSan || move.bestUci || "the engine move",
@@ -2548,7 +2073,7 @@
       category: conceptData.category,
       severity: severityFromCpl(move.cpl || 0),
       explanation,
-      alternative: effectiveLabel === "Good" || effectiveLabel === "Inaccuracy" ? bestSuggestion : "",
+      alternative: move.label === "Good" || move.label === "Inaccuracy" ? bestSuggestion : "",
       whatChanged: consequences.whatChanged,
       lesson: consequences.lesson,
       advice: consequences.advice
@@ -2556,7 +2081,7 @@
   }
 
   function getCoachExplanationData(move, allPlayerMoves = []) {
-    const cacheKey = `${move.beforeFen || ""}|${move.afterFen || ""}|${inferredMoveLabel(move) || ""}|${move.cpl || 0}`;
+    const cacheKey = `${move.beforeFen || ""}|${move.afterFen || ""}|${move.label || ""}|${move.cpl || 0}`;
     if (move.__coachCache?.key === cacheKey) {
       return move.__coachCache.value;
     }
@@ -2582,18 +2107,10 @@
   }
 
   function isKingPawnMove(move, color) {
-    if (!move?.from) {
-      return false;
-    }
-
     return (color === "w" && ["f2", "g2", "h2"].includes(move.from)) || (color === "b" && ["f7", "g7", "h7"].includes(move.from));
   }
 
   function isMajorPieceMoveInOpening(move, beforeFen) {
-    if (!move?.from) {
-      return false;
-    }
-
     const pieceName = pieceNameAtFen(beforeFen, move.from);
     return move.moveNumber <= 8 && (pieceName === "queen" || pieceName === "rook" || pieceName === "king");
   }
@@ -2825,6 +2342,23 @@
     };
   }
 
+  function sendRuntimeMessage(message) {
+    return new Promise((resolve, reject) => {
+      try {
+        chrome.runtime.sendMessage(message, (response) => {
+          const lastError = chrome.runtime.lastError;
+          if (lastError) {
+            reject(new Error(lastError.message));
+            return;
+          }
+          resolve(response);
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
   function resultForViewer(gameData) {
     const result = String(gameData?.game?.pgnHeaders?.Result || "");
     if (result === "1/2-1/2") {
@@ -2950,6 +2484,23 @@
     return insights.slice(0, 3);
   }
 
+  function buildHabitCopy(patternSummary) {
+    const dominant = patternSummary?.dominant;
+    if (!dominant) {
+      return {
+        label: "Your habit",
+        text: "Play a few reviewed games and your strongest pattern will show up here."
+      };
+    }
+
+    const label = dominant.type === "strength" ? "Your strength" : "Your habit";
+    const habitName = HABIT_COPY[dominant.tag] || dominant.tag.replaceAll("_", " ");
+    return {
+      label,
+      text: `${habitName} (${dominant.count} / last ${dominant.window} games)`
+    };
+  }
+
   function buildReviewSummary(gameData, results) {
     const result = resultForViewer(gameData);
     const playerMoves = results.filter((move) => move.color === state.viewerColor);
@@ -3016,6 +2567,48 @@
     };
   }
 
+  async function saveReviewAndGetPatterns(reviewSummary) {
+    try {
+      const accessResponse = await sendRuntimeMessage({ type: "crf:get-access" }).catch(() => null);
+      const access = accessResponse?.ok
+        ? accessResponse.access
+        : { userPlan: "free", hasProAccess: false, ownerBypass: false };
+      console.log("[CRF content] analysis finished", {
+        gameId: reviewSummary.gameId,
+        userPlan: access.userPlan,
+        hasProAccess: access.hasProAccess,
+        ownerBypass: access.ownerBypass,
+        result: reviewSummary.result
+      });
+      const response = await sendRuntimeMessage({
+        type: "crf:save-review",
+        payload: {
+          gameId: reviewSummary.gameId,
+          date: reviewSummary.date,
+          result: reviewSummary.result,
+          color: reviewSummary.color,
+          opening: reviewSummary.opening,
+          blunders: reviewSummary.blunders,
+          mistakes: reviewSummary.mistakes,
+          inaccuracies: reviewSummary.inaccuracies,
+          mistakeTags: reviewSummary.mistakeTags,
+          goodTags: reviewSummary.goodTags,
+          moveCount: reviewSummary.moveCount,
+          phaseBreakdown: reviewSummary.phaseBreakdown,
+          primaryReason: reviewSummary.primaryReason,
+          reasonTag: reviewSummary.reasonTag,
+          summary: reviewSummary.summary,
+          createdAt: Date.now()
+        }
+      });
+      console.log("[CRF content] save-review response", response);
+      return response?.ok ? response.summary : null;
+    } catch {
+      console.error("[CRF content] saveReviewAndGetPatterns failed");
+      return null;
+    }
+  }
+
   function viewerColorToBoardOrientation(viewerColor) {
     return viewerColor === "b" ? "black" : "white";
   }
@@ -3059,9 +2652,29 @@
       .toLowerCase();
   }
 
+  /**
+   * Content scripts cannot read page `window.user` (isolated world). Run a tiny
+   * script in the page context and stash username/id on <html> for us to read.
+   */
   function syncPageContextViewerIdentity() {
-    // Intentionally blank. Injecting an inline page script here violates
-    // Chrome extension CSP on Chess.com, so we fall back to DOM scraping.
+    const marker = "data-crf-viewer-sync";
+    if (document.documentElement.getAttribute(marker) === "1") {
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.textContent = `(function(){
+      try {
+        var u = (window.user && window.user.username) ||
+          (window.chesscom && window.chesscom.user && window.chesscom.user.username) || "";
+        var uid = (window.user && (window.user.id || window.user.userId || window.user.uuid));
+        document.documentElement.setAttribute("data-crf-viewer-username", u || "");
+        document.documentElement.setAttribute("data-crf-viewer-id", uid != null ? String(uid) : "");
+        document.documentElement.setAttribute("${marker}", "1");
+      } catch (e) {}
+    })();`;
+    (document.head || document.documentElement).appendChild(script);
+    script.remove();
   }
 
   function scrapeUsernameFromChessDom() {
@@ -3093,11 +2706,18 @@
   }
 
   function getViewerUsernameFromPage() {
+    syncPageContextViewerIdentity();
+    const fromAttr = document.documentElement.getAttribute("data-crf-viewer-username");
+    if (fromAttr && fromAttr.trim()) {
+      return fromAttr.trim().toLowerCase();
+    }
     return scrapeUsernameFromChessDom();
   }
 
   function getViewerIdFromPage() {
-    return null;
+    syncPageContextViewerIdentity();
+    const id = document.documentElement.getAttribute("data-crf-viewer-id");
+    return id && id.length ? id : null;
   }
 
   function usernameMatchesHeader(username, headerNormalized) {
@@ -3230,6 +2850,62 @@
     return detectBoardOrientation() === "black" ? "b" : "w";
   }
 
+  async function openChessDNAProfile() {
+    const accessResponse = await sendRuntimeMessage({ type: "crf:get-access" }).catch(() => null);
+    const access = accessResponse?.ok ? accessResponse.access : { hasProAccess: false };
+    if (access.hasProAccess) {
+      openProfileOverlay();
+      return;
+    }
+
+    if (state.dnaLock) {
+      state.dnaLock.classList.toggle("crf-hidden");
+    }
+  }
+
+  function closeProfileOverlay() {
+    if (!state.dnaOverlay) {
+      return;
+    }
+    state.dnaOverlay.remove();
+    state.dnaOverlay = null;
+  }
+
+  function openProfileOverlay() {
+    if (state.dnaOverlay) {
+      return;
+    }
+
+    const overlay = document.createElement("div");
+    overlay.id = "crf-dna-overlay";
+    overlay.innerHTML = `
+      <div class="crf-dna-overlay-backdrop"></div>
+      <div class="crf-dna-overlay-content">
+        <button id="crf-dna-overlay-close" type="button" aria-label="Close Chess DNA">×</button>
+        <iframe
+          id="crf-dna-overlay-frame"
+          src="${chrome.runtime.getURL("profile.html")}?embedded=1"
+          title="Chess DNA Profile"
+        ></iframe>
+      </div>
+    `;
+
+    overlay.querySelector(".crf-dna-overlay-backdrop")?.addEventListener("click", closeProfileOverlay);
+    overlay.querySelector("#crf-dna-overlay-close")?.addEventListener("click", closeProfileOverlay);
+    document.documentElement.appendChild(overlay);
+    state.dnaOverlay = overlay;
+  }
+
+  function highlightDnaCta() {
+    if (!state.dnaLauncher) {
+      return;
+    }
+    state.dnaLauncher.classList.add("crf-dna-cta-highlight");
+    window.setTimeout(() => {
+      state.dnaLauncher?.classList.remove("crf-dna-cta-highlight");
+    }, 2600);
+  }
+
   function ensureUi() {
     if (state.root && state.launcher) {
       return;
@@ -3242,6 +2918,29 @@
     launcher.addEventListener("click", () => {
       state.root.classList.remove("crf-hidden");
       launcher.classList.add("crf-hidden");
+    });
+
+    const dnaLauncher = document.createElement("button");
+    dnaLauncher.id = "crf-dna-launcher";
+    dnaLauncher.type = "button";
+    dnaLauncher.textContent = "View Chess DNA";
+    dnaLauncher.addEventListener("click", () => {
+      openChessDNAProfile().catch((error) => console.error("[CRF DNA] failed to open profile", error));
+    });
+
+    const dnaLock = document.createElement("aside");
+    dnaLock.id = "crf-dna-lock";
+    dnaLock.className = "crf-hidden";
+    dnaLock.innerHTML = `
+      <strong>Unlock Chess DNA</strong>
+      <p>Game library, weakest phase analysis, and recurring mistake patterns.</p>
+      <span>$8/month</span>
+      <button id="crf-dna-upgrade" type="button">Upgrade with Stripe</button>
+    `;
+    dnaLock.querySelector("#crf-dna-upgrade")?.addEventListener("click", () => {
+      sendRuntimeMessage({ type: "crf:open-upgrade" }).catch((error) => {
+        console.error("[CRF DNA] failed to open upgrade", error);
+      });
     });
 
     const root = document.createElement("aside");
@@ -3276,9 +2975,9 @@
               <span class="crf-stat-label">Mistakes</span>
               <span class="crf-hero-stat-value" id="crf-mistake-stat">0</span>
             </div>
-            <div class="crf-focus-card">
-              <div class="crf-reason-label" id="crf-focus-label">What to work on next</div>
-              <div class="crf-focus-text" id="crf-focus-text">Run a review and this panel will turn the biggest mistake into one clear next step.</div>
+            <div class="crf-habit-card">
+              <div class="crf-reason-label" id="crf-habit-label">Your habit</div>
+              <div class="crf-habit-text" id="crf-habit-text">Play a few reviewed games and a pattern will show up here.</div>
             </div>
           </div>
         </section>
@@ -3353,7 +3052,7 @@
       </div>
     `;
 
-    document.documentElement.append(root, launcher);
+    document.documentElement.append(root, launcher, dnaLauncher, dnaLock);
 
     root.querySelector("#crf-close").addEventListener("click", () => {
       root.classList.add("crf-hidden");
@@ -3362,6 +3061,8 @@
 
     state.root = root;
     state.launcher = launcher;
+    state.dnaLauncher = dnaLauncher;
+    state.dnaLock = dnaLock;
     state.status = root.querySelector("#crf-status");
     state.progressBar = root.querySelector("#crf-progress-bar");
     state.resultBadge = root.querySelector("#crf-result-badge");
@@ -3369,8 +3070,8 @@
     state.reasonText = root.querySelector("#crf-reason-text");
     state.blunderStat = root.querySelector("#crf-blunder-stat");
     state.mistakeStat = root.querySelector("#crf-mistake-stat");
-    state.focusLabel = root.querySelector("#crf-focus-label");
-    state.focusText = root.querySelector("#crf-focus-text");
+    state.habitLabel = root.querySelector("#crf-habit-label");
+    state.habitText = root.querySelector("#crf-habit-text");
     state.insightList = root.querySelector("#crf-insight-list");
     state.summary = root.querySelector("#crf-summary");
     state.moves = root.querySelector("#crf-moves");
@@ -3408,13 +3109,34 @@
       {
         result: "draw",
         reasonText: "Run review to see the clearest reason you won or lost.",
-        adviceText: "After the review runs, this panel will show one practical fix to carry into your next game.",
         blunders: 0,
         mistakes: 0,
         insights: ["Review will highlight one clear reason, blunder count, and your biggest trend."]
-      }
+      },
+      null
     );
   }
+
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === "crf:open-profile-overlay") {
+      openChessDNAProfile()
+        .then(() => sendResponse({ ok: true }))
+        .catch((error) => sendResponse({ ok: false, error: error?.message || String(error) }));
+      return true;
+    }
+
+    return false;
+  });
+
+  window.addEventListener("message", (event) => {
+    if (event.origin !== chrome.runtime.getURL("").slice(0, -1)) {
+      return;
+    }
+
+    if (event.data?.type === "crf:close-profile-overlay") {
+      closeProfileOverlay();
+    }
+  });
 
   function enableDragging(root) {
     const handle = root.querySelector("#crf-drag-handle");
@@ -3463,7 +3185,8 @@
     }
   }
 
-  function setReviewHero(summary) {
+  function setReviewHero(summary, patternSummary) {
+    const habit = buildHabitCopy(patternSummary);
     if (state.resultBadge) {
       state.resultBadge.textContent = summary.result === "win" ? "You Won" : summary.result === "loss" ? "You Lost" : "Draw";
       state.resultBadge.dataset.result = summary.result;
@@ -3480,13 +3203,11 @@
     if (state.mistakeStat) {
       state.mistakeStat.textContent = String(summary.mistakes);
     }
-    if (state.focusLabel) {
-      state.focusLabel.textContent = "What to work on next";
+    if (state.habitLabel) {
+      state.habitLabel.textContent = habit.label;
     }
-    if (state.focusText) {
-      state.focusText.textContent =
-        summary.adviceText ||
-        "Use the biggest swing from this game as one concrete thing to clean up in the next one.";
+    if (state.habitText) {
+      state.habitText.textContent = habit.text;
     }
     if (state.insightList) {
       state.insightList.innerHTML = summary.insights.map((insight) => `<li>${escapeHtml(insight)}</li>`).join("");
@@ -3504,9 +3225,8 @@
       return;
     }
 
-    const effectiveLabel = safeLabelText(move);
-    const movePrefix = movePrefixLabel(move);
-    state.coachLabel.textContent = `Why ${movePrefix} was ${effectiveLabel}`;
+    const movePrefix = move.color === "w" ? `${move.moveNumber}. ${move.san}` : `${move.moveNumber}... ${move.san}`;
+    state.coachLabel.textContent = `Why ${movePrefix} was ${safeLabelText(move)}`;
     state.coachExplanation.textContent = buildCoachPanelCopy(move);
   }
 
@@ -3830,15 +3550,13 @@
     state.moves.innerHTML = results
       .map((move, index) => {
         const moveNumber = move.color === "w" ? `${move.moveNumber}.` : `${move.moveNumber}...`;
-        const moveSan = move.san || move.moveSan || "this move";
-        const moveLabel = inferredMoveLabel(move) || move.label || "Move";
         return `
           <article class="crf-move" data-ply-index="${index + 1}">
             <div class="crf-move-top">
-              <strong>${escapeHtml(moveNumber)} ${escapeHtml(moveSan)}</strong>
+              <strong>${escapeHtml(moveNumber)} ${escapeHtml(move.san)}</strong>
               <div class="crf-move-top-right">
-                ${renderStickerMarkup(moveLabel)}
-                <span class="crf-badge ${colorBadgeClass(moveLabel)}">${escapeHtml(moveLabel)}</span>
+                ${renderStickerMarkup(move.label)}
+                <span class="crf-badge ${colorBadgeClass(move.label)}">${escapeHtml(move.label)}</span>
               </div>
             </div>
             <div class="crf-move-meta">
@@ -3846,8 +3564,8 @@
               <span class="crf-kbd">Swing ${moveSwingText(move.cpl)}</span>
               <span class="crf-kbd">Eval ${escapeHtml(formatEngineEvalText(move.afterScore || { unit: "cp", value: 0 }))}</span>
             </div>
-            <p class="crf-muted">Best move: <strong>${escapeHtml(move.bestSan || move.bestUci || "N/A")}</strong> · Played: <strong>${escapeHtml(moveSan)}</strong></p>
-            <p class="crf-move-expl">${escapeHtml(move.explanation || `${moveSan} was labeled ${safeLabelText(move)}.`)}</p>
+            <p class="crf-muted">Best move: <strong>${escapeHtml(move.bestSan || move.bestUci || "N/A")}</strong> · Played: <strong>${escapeHtml(move.san)}</strong></p>
+            <p class="crf-move-expl">${escapeHtml(move.explanation || `${escapeHtml(move.san || "Move")} was labeled ${escapeHtml(safeLabelText(move))}.`)}</p>
             <p class="crf-muted">Engine line: ${escapeHtml(move.pvSan || move.bestUci || "N/A")}</p>
           </article>
         `;
@@ -3959,9 +3677,7 @@
       }
 
       const line = state.analysisMoves.length ? ` · Line ${state.analysisMoves.join(" ")}` : "";
-      const moveSan = currentAnalysis.moveSan || currentAnalysis.san || "this move";
-      const label = currentAnalysis.label || inferredMoveLabel(currentAnalysis) || "Move";
-      return `Edit mode · ${moveSan} · ${label} · Accuracy ${currentAnalysis.accuracy}%${line}`;
+      return `Edit mode · ${currentAnalysis.moveSan} · ${currentAnalysis.label} · Accuracy ${currentAnalysis.accuracy}%${line}`;
     }
 
     if (!state.currentResults.length || plyIndex <= 0) {
@@ -3970,9 +3686,7 @@
 
     const move = state.currentResults[Math.min(plyIndex - 1, state.currentResults.length - 1)];
     const moveNumber = move.color === "w" ? `${move.moveNumber}.` : `${move.moveNumber}...`;
-    const moveSan = move.san || move.moveSan || "this move";
-    const label = move.label || inferredMoveLabel(move) || "Move";
-    return `${moveNumber} ${moveSan} · ${label} · Accuracy ${move.accuracy}%`;
+    return `${moveNumber} ${move.san} · ${move.label} · Accuracy ${move.accuracy}%`;
   }
 
   function renderFiles(orientation = "white") {
@@ -4149,19 +3863,9 @@
           const cpl = Math.max(0, Math.round(scoreToCp(bestMoverScore) - scoreToCp(playedMoverScore)));
           const accuracy = accuracyFromCpl(cpl);
           const label = classifyMove(cpl, uci, best.bestmove);
-          const plyIndex = state.currentPlyIndex + state.analysisMoves.length - 1;
-          const normalizedMove = {
-            plyIndex,
-            moveNumber: toMoveNumber(plyIndex, played.color),
-            color: played.color,
-            san: played.san,
+          const result = {
             moveSan: played.san,
-            uci,
             moveUci: uci,
-            from: played.from,
-            to: played.to,
-            beforeFen,
-            afterFen,
             accuracy,
             cpl,
             label,
@@ -4171,28 +3875,46 @@
             bestScore,
             pvSan: pvToSan(beforeFen, best.pv)
           };
-          const teaching = buildMoveTeachingNotes(normalizedMove);
-          normalizedMove.explanation = buildMoveExplanation(normalizedMove);
-          normalizedMove.category = teaching.category;
-          normalizedMove.severity = teaching.severity;
-          normalizedMove.featuresDetected = teaching.featuresDetected;
-          normalizedMove.movePurpose = teaching.movePurpose;
-          normalizedMove.mainConcepts = teaching.mainConcepts;
-          normalizedMove.alternative = teaching.alternative;
-          normalizedMove.whatChanged = teaching.whatChanged;
-          normalizedMove.lesson = teaching.lesson;
-          normalizedMove.advice = teaching.advice;
+          const teaching = buildMoveTeachingNotes({
+            ...result,
+            san: played.san,
+            from: played.from,
+            to: played.to,
+            color: played.color,
+            beforeFen,
+            afterFen,
+            moveNumber: state.analysisMoves.length ? state.analysisMoves.length : 1
+          });
+          result.explanation = buildMoveExplanation({
+            ...result,
+            san: played.san,
+            from: played.from,
+            to: played.to,
+            color: played.color,
+            beforeFen,
+            afterFen,
+            moveNumber: state.analysisMoves.length ? state.analysisMoves.length : 1
+          });
+          result.category = teaching.category;
+          result.severity = teaching.severity;
+          result.featuresDetected = teaching.featuresDetected;
+          result.movePurpose = teaching.movePurpose;
+          result.mainConcepts = teaching.mainConcepts;
+          result.alternative = teaching.alternative;
+          result.whatChanged = teaching.whatChanged;
+          result.lesson = teaching.lesson;
+          result.advice = teaching.advice;
 
-          state.analysisByFen[afterFen] = normalizedMove;
+          state.analysisByFen[afterFen] = result;
 
           if (state.analysisFen === afterFen || token === state.analysisToken) {
-            state.analysisResult = normalizedMove;
+            state.analysisResult = result;
             setStatus(`Analysis board: ${played.san} is marked ${label.toLowerCase()} (${accuracy}% accuracy).`);
             updateEvalBar(state.currentPlyIndex);
           }
         } catch (error) {
           console.error("Analysis board move failed", error);
-          setStatus(runtimeSafeMessage(error, "Could not analyze that move."));
+          setStatus("Could not analyze that move.");
         } finally {
           if (token === state.analysisToken) {
             state.analysisPending = false;
@@ -4228,7 +3950,7 @@
       console.error("Engine move failed", error);
       state.analysisPending = false;
       updateAnalysisActionButtons();
-      setStatus(runtimeSafeMessage(error, "Could not play the engine move from this position."));
+      setStatus("Could not play the engine move from this position.");
       renderBoardAtPly(state.currentPlyIndex);
     }
   }
@@ -4352,18 +4074,6 @@
         throw new Error(`Illegal move encountered at ply ${index + 1}.`);
       }
 
-      const previousMoveMeta = moves.length
-        ? {
-            color: moves[moves.length - 1].color,
-            from: moves[moves.length - 1].from,
-            to: moves[moves.length - 1].to,
-            san: moves[moves.length - 1].san,
-            uci: moves[moves.length - 1].uci,
-            wasCapture: Boolean(moves[moves.length - 1].capturedPiece),
-            wasCheck: /[+#]/.test(moves[moves.length - 1].san || "")
-          }
-        : null;
-
       moves.push({
         plyIndex: index,
         moveNumber: toMoveNumber(index, played.color),
@@ -4373,9 +4083,7 @@
         from: played.from,
         to: played.to,
         uci: `${played.from}${played.to}${played.promotion || ""}`,
-        san: played.san,
-        capturedPiece: played.captured || null,
-        previousMoveMeta
+        san: played.san
       });
     });
 
@@ -4384,8 +4092,8 @@
 
   class StockfishClient {
     constructor() {
-      const stockfishUrl = safeRuntimeGetURL("vendor-stockfish.js");
-      const wasmUrl = safeRuntimeGetURL("vendor-stockfish.wasm");
+      const stockfishUrl = chrome.runtime.getURL("vendor-stockfish.js");
+      const wasmUrl = chrome.runtime.getURL("vendor-stockfish.wasm");
       const workerSource = `
         importScripts(${JSON.stringify(stockfishUrl)});
       `;
@@ -4397,7 +4105,7 @@
       this.phase = "boot";
       this.pending = null;
       this.searchQueue = Promise.resolve();
-      this.worker.addEventListener("message", (event) => this.handleLine(String(event?.data ?? "")));
+      this.worker.addEventListener("message", (event) => this.handleLine(String(event.data || "")));
     }
 
     async init() {
@@ -4496,15 +4204,8 @@
     }
 
     terminate() {
-      try {
-        this.worker.postMessage("quit");
-      } catch {
-        /* noop */
-      }
-
-      if (typeof this.worker?.terminate === "function") {
-        this.worker.terminate();
-      }
+      this.worker.postMessage("quit");
+      this.worker.terminate();
     }
   }
 
@@ -4568,7 +4269,7 @@
         break;
       }
 
-      moves.push(move.san || move.moveSan || move.uci || "move");
+      moves.push(move.san);
     }
 
     return moves.join(" ");
@@ -4621,7 +4322,7 @@
 
       for (let index = 0; index < moves.length; index += 1) {
         const move = moves[index];
-        setStatus(`Analyzing move ${index + 1} of ${moves.length}: ${move.san || move.moveSan || "this move"}`);
+        setStatus(`Analyzing move ${index + 1} of ${moves.length}: ${move.san}`);
         setProgress(index, moves.length);
 
         const best = await stockfish.analyzeFen(move.beforeFen, { depth: profile.bestDepth });
@@ -4690,13 +4391,15 @@
       }
 
       const reviewSummary = buildReviewSummary(gameData, results);
-      setReviewHero(reviewSummary);
+      const patternSummary = await saveReviewAndGetPatterns(reviewSummary);
+      highlightDnaCta();
+      setReviewHero(reviewSummary, patternSummary);
       setProgress(moves.length, moves.length);
       renderBoardAtPly(0);
       setStatus(`Finished. Reviewed ${results.length} ply with a local Stockfish engine.`);
     } catch (error) {
       console.error(error);
-      setStatus(runtimeSafeMessage(error));
+      setStatus(error instanceof Error ? error.message : "Analysis failed.");
     } finally {
       if (state.analyzeButton) {
         state.analyzeButton.disabled = false;
