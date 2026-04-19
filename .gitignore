@@ -1,5 +1,0 @@
-.DS_Store
-analysis-debug.json
-*.tar.gz
-stripe-test-server/.env
-stripe-test-server/data/*.json
