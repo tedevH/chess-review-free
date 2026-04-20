@@ -1,14 +1,23 @@
 {
   "manifest_version": 3,
-  "name": "Chess Review Free",
-  "version": "0.1.5",
-  "description": "Free post-game analysis overlay for Chess.com using a local Stockfish engine.",
+  "name": "Chess Move Coach",
+  "version": "0.1.6",
+  "description": "Independent local chess analysis workspace with optional Chess.com game import.",
+  "permissions": [
+    "storage",
+    "scripting"
+  ],
   "host_permissions": [
     "https://www.chess.com/*"
   ],
   "action": {
-    "default_title": "Chess Review Free",
-    "default_popup": "popup.html"
+    "default_title": "Chess Move Coach"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
   },
   "content_scripts": [
     {
@@ -18,9 +27,6 @@
       ],
       "js": [
         "content.js"
-      ],
-      "css": [
-        "overlay.css"
       ],
       "run_at": "document_idle"
     }

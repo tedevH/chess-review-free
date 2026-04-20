@@ -35,17 +35,16 @@
   try {
     ({ Chess } = await import(safeRuntimeGetURL("vendor-chess.js")));
   } catch (error) {
-    console.error("Failed to initialize Chess Review Free", error);
+    console.error("Failed to initialize Chess Move Coach", error);
     return;
   }
 
   const PANEL_ID = "crf-root";
-  const LAUNCHER_ID = "crf-launcher";
-  const RETRY_DELAY_MS = 1200;
+  const IMPORT_STORAGE_KEY = "crfImportedGame";
+  const IS_ANALYZER_PAGE = window.location.pathname.endsWith("/analyzer.html");
 
   const state = {
     root: null,
-    launcher: null,
     status: null,
     progressBar: null,
     resultBadge: null,
@@ -60,6 +59,7 @@
     moves: null,
     chart: null,
     analyzeButton: null,
+    boardCard: null,
     board: null,
     boardCoordinates: null,
     boardCaption: null,
@@ -91,8 +91,23 @@
     analysisQueue: Promise.resolve(),
     analysisToken: 0,
     deepEvalToken: 0,
+    loadedInput: null,
+    currentGameId: null,
     destroyed: false
   };
+
+  function storageGet(keys) {
+    return new Promise((resolve, reject) => {
+      chrome.storage.local.get(keys, (value) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+
+        resolve(value);
+      });
+    });
+  }
 
   function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
@@ -1112,6 +1127,27 @@
     }
   }
 
+  function inferBestReplyInfo(move) {
+    if (!move?.afterFen || !move?.replyUci) {
+      return null;
+    }
+
+    const result = applyUciMoveToFen(move.afterFen, move.replyUci);
+    if (!result?.move) {
+      return null;
+    }
+
+    return {
+      san: result.move.san || move.replyUci,
+      uci: move.replyUci,
+      from: result.move.from,
+      to: result.move.to,
+      piece: result.move.piece || null,
+      captured: result.move.captured || null,
+      capturesMovedPiece: result.move.to === move.to
+    };
+  }
+
   function severityFromCpl(cpl = 0) {
     if (cpl >= 220) {
       return "high";
@@ -1959,6 +1995,7 @@
     const prophylacticPawnIdea = detectProphylacticPawnIdea(move, movedPiece);
     const blockedOwnBishop = blocksHomeBishop(move.beforeFen, move.color, move.from, move.to, movedPiece?.type);
     const immediatePunish = analyzeImmediatePunish(move.afterFen, move.color, move.to);
+    const bestReply = inferBestReplyInfo(move);
     const bestMoveImprovesDevelopmentMore = Boolean(
       move.bestUci &&
       (() => {
@@ -2015,6 +2052,7 @@
       prophylacticPawnIdea,
       blockedOwnBishop,
       immediatePunish,
+      bestReply,
       bestMoveImprovesDevelopmentMore,
       bestMoveFeatures: null
     };
@@ -2192,9 +2230,10 @@
         square: piece.square,
         type: piece.type,
         value: pieceValue(piece),
-        wasLooseBefore: features.ownLooseBefore.some((entry) => entry.square === piece.square)
+        wasLooseBefore: features.ownLooseBefore.some((entry) => entry.square === piece.square),
+        wasAttackedBefore: attackerSquares(move.beforeFen, piece.square, enemyColor).length > 0
       }))
-      .sort((a, b) => (b.wasLooseBefore - a.wasLooseBefore) || (b.value - a.value));
+      .sort((a, b) => (b.wasLooseBefore - a.wasLooseBefore) || (b.wasAttackedBefore - a.wasAttackedBefore) || (b.value - a.value));
     const newlyDefendedTargets = defendedTargets.filter((piece) => !attackerSquares(move.beforeFen, piece.square, move.color).includes(move.from));
 
     return {
@@ -2266,6 +2305,12 @@
     const defendedTarget = impacts.newlyDefendedTargets.find((target) => target.wasLooseBefore) || impacts.newlyDefendedTargets[0];
     const pressuredSquares = summarizeSquarePressure(impacts.pressuredSquares, move.color, impacts.enemyKingSquares, impacts.ownKingSquares);
     const pieceName = features.movedPieceName;
+    const isEarlyCentralPawnMove = Boolean(
+      features.movedPiece?.type === "p" &&
+      move.moveNumber <= 4 &&
+      ["d4", "e4", "d5", "e5"].includes(move.to) &&
+      (features.centralOccupationGain > 0 || features.centralControlGain > 0)
+    );
 
     if (features.isCastling) {
       return "gets the king off the center and brings the rook into play";
@@ -2303,6 +2348,16 @@
 
     if (features.threatResponse && features.addressesThreat) {
       return "meets the immediate threat and keeps the position together";
+    }
+
+    if (isEarlyCentralPawnMove) {
+      if (features.opensDiagonal) {
+        return "claims central space and opens lines for the bishop and queen";
+      }
+      if (features.centralOccupationGain > 0) {
+        return "claims space in the center and makes the position easier to develop";
+      }
+      return "improves central control in the opening";
     }
 
     if (pressuredSquares) {
@@ -2345,6 +2400,8 @@
   function buildRoutineExplanation(move, features, effectiveLabel) {
     const played = move.san || move.moveSan || "your move";
     const impacts = analyzeConcreteImpacts(move, features);
+    const attackedTarget = impacts.attackedTargets[0];
+    const defendedTargetUnderAttack = impacts.defendedTargets.find((target) => target.wasAttackedBefore);
     const defendedTarget = impacts.newlyDefendedTargets.find((target) => target.wasLooseBefore) || impacts.newlyDefendedTargets[0];
     const pressuredSquares = summarizeSquarePressure(impacts.pressuredSquares, move.color, impacts.enemyKingSquares, impacts.ownKingSquares);
 
@@ -2366,6 +2423,16 @@
     }
 
     if (isRoutineDevelopingMove(move, features)) {
+      if (defendedTargetUnderAttack) {
+        return `${played} is ${effectiveLabel.toLowerCase()} because it develops a piece while defending ${describePieceTarget(defendedTargetUnderAttack, true)}.`;
+      }
+      if (attackedTarget) {
+        const targetText = describePieceTarget(attackedTarget, true);
+        if (attackedTarget.type === "p") {
+          return `${played} is ${effectiveLabel.toLowerCase()} because it develops a piece while adding pressure to ${targetText}.`;
+        }
+        return `${played} is ${effectiveLabel.toLowerCase()} because it develops a piece while attacking ${targetText}.`;
+      }
       if (pressuredSquares) {
         return `${played} is ${effectiveLabel.toLowerCase()} because it develops a piece while increasing pressure on ${pressuredSquares}.`;
       }
@@ -2593,6 +2660,13 @@
 
     switch (conceptData.category) {
       case "hung_piece":
+        if (features.bestReply?.captured && features.bestReply?.capturesMovedPiece) {
+          return {
+            whatChanged: `After ${playedMove}, ${features.bestReply.san} was the clean punishment and won your ${features.immediatePunish?.targetPieceName || PIECE_NAMES[features.bestReply.captured] || "piece"} on ${move.to}.`,
+            lesson: "What matters is not just that a piece can be taken, but whether the opponent has a clean tactical way to punish it.",
+            advice: "Before pushing or dropping a piece onto a loose square, ask what the opponent's strongest reply is, not just what captures exist."
+          };
+        }
         if (features.immediatePunish?.isHanging) {
           return {
             whatChanged: `After ${playedMove}, your ${features.immediatePunish.targetPieceName} on ${features.immediatePunish.targetSquare} could be taken by ${features.immediatePunish.cheapestAttackerName === "pawn" ? "a pawn" : `the ${features.immediatePunish.cheapestAttackerName}`} from ${features.immediatePunish.cheapestAttackerSquare}.`,
@@ -2739,6 +2813,10 @@
     } else {
       switch (conceptData.category) {
         case "hung_piece":
+          if (features.bestReply?.captured && features.bestReply?.capturesMovedPiece) {
+            explanation = `${played} is a ${labelText} because ${features.bestReply.san} is the clean punishment and wins your ${features.immediatePunish?.targetPieceName || PIECE_NAMES[features.bestReply.captured] || "piece"} on ${move.to}.`;
+            break;
+          }
           if (features.immediatePunish?.isHanging) {
             explanation = `${played} is a ${labelText} because your ${features.immediatePunish.targetPieceName} can be taken immediately by ${features.immediatePunish.cheapestAttackerName === "pawn" ? "a pawn" : `the ${features.immediatePunish.cheapestAttackerName}`}.`;
           } else {
@@ -3245,7 +3323,7 @@
         };
 
     return {
-      gameId: parseGameId() || `${Date.now()}`,
+      gameId: state.currentGameId || parseGameId() || `${Date.now()}`,
       date: Date.now(),
       result,
       color: state.viewerColor === "b" ? "black" : "white",
@@ -3491,41 +3569,34 @@
   }
 
   function ensureUi() {
-    if (state.root && state.launcher) {
+    if (!IS_ANALYZER_PAGE || state.root) {
       return;
     }
+    document.body.classList.add("crf-analyzer-page");
 
-    const launcher = document.createElement("button");
-    launcher.id = LAUNCHER_ID;
-    launcher.type = "button";
-    launcher.textContent = "Game Review";
-    launcher.addEventListener("click", () => {
-      state.root.classList.remove("crf-hidden");
-      launcher.classList.add("crf-hidden");
-    });
+    const pageShell = document.createElement("div");
+    pageShell.className = "crf-page-shell";
 
-    const root = document.createElement("aside");
+    const root = document.createElement("main");
     root.id = PANEL_ID;
-    root.className = "crf-hidden";
     root.innerHTML = `
-      <div class="crf-header" id="crf-drag-handle">
+      <div class="crf-header">
         <div>
-          <h2 class="crf-title">Chess Review Free</h2>
-          <p class="crf-subtitle">Instant post-game review with local Stockfish and habit tracking.</p>
+          <h1 class="crf-page-title">Chess Move Coach</h1>
+          <p class="crf-subtitle">Independent review with a local Stockfish engine in its own tab.</p>
         </div>
-        <button class="crf-close" id="crf-close" type="button" aria-label="Close review panel">Back to game</button>
       </div>
       <div class="crf-scroll">
         <section class="crf-hero">
           <div class="crf-hero-main">
-            <div class="crf-result-badge" id="crf-result-badge" data-result="draw">Game Review</div>
-            <div class="crf-reason-label" id="crf-reason-label">Why this game mattered</div>
-            <div class="crf-reason-text" id="crf-reason-text">Run review to see the clearest reason you won or lost.</div>
-            <button class="crf-cta" id="crf-analyze" type="button">Analyze This Game</button>
+            <div class="crf-result-badge" id="crf-result-badge" data-result="draw">Independent Analysis</div>
+            <div class="crf-reason-label" id="crf-reason-label">Ready to analyze</div>
+            <div class="crf-reason-text" id="crf-reason-text">Click the extension on a finished Chess.com game to open a full analysis here.</div>
+            <button class="crf-cta" id="crf-analyze" type="button" hidden>Run Analysis Again</button>
             <div class="crf-progress">
               <div class="crf-progress-bar" id="crf-progress-bar"></div>
             </div>
-            <p class="crf-muted" id="crf-status">Waiting for a finished Chess.com live game.</p>
+            <p class="crf-muted" id="crf-status">Open a finished Chess.com game and click the extension button to analyze it here.</p>
           </div>
           <div class="crf-hero-side">
             <div class="crf-hero-stat">
@@ -3538,20 +3609,20 @@
             </div>
             <div class="crf-focus-card">
               <div class="crf-reason-label" id="crf-focus-label">What to work on next</div>
-              <div class="crf-focus-text" id="crf-focus-text">Run a review and this panel will turn the biggest mistake into one clear next step.</div>
+              <div class="crf-focus-text" id="crf-focus-text">The analyzer will turn the biggest swing into one practical improvement to carry into your next game.</div>
             </div>
           </div>
         </section>
         <section class="crf-card">
           <div class="crf-row">
             <strong>Insights</strong>
-            <span class="crf-muted">Your biggest learning points from this game</span>
+            <span class="crf-muted">Key learning points from this game</span>
           </div>
           <ul class="crf-insight-list" id="crf-insight-list"></ul>
         </section>
-        <section class="crf-card">
+        <section class="crf-card" id="crf-board-card">
           <div class="crf-row">
-            <strong>Review Board</strong>
+            <strong>Analysis Board</strong>
             <span class="crf-muted">Step through the game or branch into edit mode</span>
           </div>
           <div class="crf-board-stage">
@@ -3574,8 +3645,8 @@
               <div class="crf-coach-avatar" aria-hidden="true">
                 <div class="crf-coach-logo">♞</div>
               </div>
-              <div class="crf-coach-label" id="crf-coach-label">Chess Coach</div>
-              <div class="crf-coach-explanation" id="crf-coach-explanation">Pick a move on the board or in the move list to see exactly why it was labeled best, good, inaccuracy, mistake, or blunder.</div>
+              <div class="crf-coach-label" id="crf-coach-label">Move Coach</div>
+              <div class="crf-coach-explanation" id="crf-coach-explanation">Pick a move on the board or in the move list to see why it was labeled best, good, inaccuracy, mistake, or blunder.</div>
             </aside>
           </div>
           <div class="crf-board-controls">
@@ -3585,14 +3656,14 @@
           </div>
           <div class="crf-board-actions">
             <button class="crf-nav" id="crf-engine-move" type="button">Play Engine Move</button>
-            <button class="crf-nav" id="crf-reset-line" type="button">Return to Game</button>
+            <button class="crf-nav" id="crf-reset-line" type="button">Return to Loaded Line</button>
           </div>
           <p id="crf-board-helper" class="crf-muted crf-board-helper">Click a piece on the board to test a different move from the position you are viewing.</p>
         </section>
         <section class="crf-card">
           <div class="crf-row">
             <strong>Game Metrics</strong>
-            <span class="crf-muted">Quick scorecard for this review</span>
+            <span class="crf-muted">Quick scorecard for this analysis</span>
           </div>
           <div id="crf-summary" class="crf-summary-grid"></div>
         </section>
@@ -3605,7 +3676,7 @@
         </section>
         <section class="crf-card">
           <div class="crf-row">
-            <strong>Move Review</strong>
+            <strong>Move Analysis</strong>
             <span class="crf-muted">Best line and centipawn loss</span>
           </div>
           <div id="crf-moves" class="crf-moves"></div>
@@ -3613,15 +3684,11 @@
       </div>
     `;
 
-    document.documentElement.append(root, launcher);
-
-    root.querySelector("#crf-close").addEventListener("click", () => {
-      root.classList.add("crf-hidden");
-      launcher.classList.remove("crf-hidden");
-    });
+    pageShell.append(root);
+    document.body.replaceChildren(pageShell);
 
     state.root = root;
-    state.launcher = launcher;
+    state.boardCard = root.querySelector("#crf-board-card");
     state.status = root.querySelector("#crf-status");
     state.progressBar = root.querySelector("#crf-progress-bar");
     state.resultBadge = root.querySelector("#crf-result-badge");
@@ -3667,11 +3734,11 @@
     setReviewHero(
       {
         result: "draw",
-        reasonText: "Run review to see the clearest reason you won or lost.",
-        adviceText: "After the review runs, this panel will show one practical fix to carry into your next game.",
+        reasonText: "Click the extension on a finished Chess.com game to open a full analysis here.",
+        adviceText: "After analysis runs, this workspace will show one practical fix to carry into your next game.",
         blunders: 0,
         mistakes: 0,
-        insights: ["Review will highlight one clear reason, blunder count, and your biggest trend."]
+        insights: ["Analysis will highlight one clear reason, blunder count, and your biggest trend."]
       }
     );
   }
@@ -3759,7 +3826,7 @@
     }
 
     if (!move) {
-      state.coachLabel.textContent = "Chess Coach";
+      state.coachLabel.textContent = "Move Coach";
       state.coachExplanation.textContent = "Pick a move on the board or in the move list to see exactly why it was labeled best, good, inaccuracy, mistake, or blunder.";
       return;
     }
@@ -4013,7 +4080,7 @@
         state.boardHelper.textContent = "Stockfish is analyzing your new move...";
       } else if (state.analysisActive) {
         const turnLabel = createChessFromFen(state.analysisFen).turn() === "w" ? "White" : "Black";
-        state.boardHelper.textContent = `Edit mode is live on the current position. ${turnLabel} to move. Click one of that side's pieces to see legal moves, click it again to unselect, or use Return to Game.`;
+        state.boardHelper.textContent = `Edit mode is live on the current position. ${turnLabel} to move. Click one of that side's pieces to see legal moves, click it again to unselect, or use Return to Loaded Line.`;
       } else {
         state.boardHelper.textContent = "Click a piece on the board to test a different move from the position you are viewing.";
       }
@@ -4117,7 +4184,7 @@
     state.moves.querySelectorAll("[data-ply-index]").forEach((element) => {
       element.addEventListener("click", () => {
         if (state.analysisActive) {
-          setStatus("Edit mode is active. Use Return to Game to leave the analysis board.");
+          setStatus("Edit mode is active. Use Return to Loaded Line to leave the analysis board.");
           return;
         }
         const plyIndex = Number(element.getAttribute("data-ply-index"));
@@ -4339,7 +4406,7 @@
 
   function stepBoard(direction) {
     if (state.analysisActive) {
-      setStatus("Edit mode is active. Use Return to Game to leave the analysis board.");
+      setStatus("Edit mode is active. Use Return to Loaded Line to leave the analysis board.");
       return;
     }
     renderBoardAtPly(state.currentPlyIndex + direction);
@@ -4427,6 +4494,8 @@
             label,
             bestUci: best.bestmove,
             bestSan: uciToSan(beforeFen, best.bestmove),
+            replyUci: after.bestmove,
+            replySan: uciToSan(afterFen, after.bestmove),
             afterScore,
             bestScore,
             pvSan: pvToSan(beforeFen, best.pv)
@@ -4644,32 +4713,66 @@
 
   class StockfishClient {
     constructor() {
-      const stockfishUrl = safeRuntimeGetURL("vendor-stockfish.js");
+      const workerUrl = safeRuntimeGetURL("stockfish-worker.js");
       const wasmUrl = safeRuntimeGetURL("vendor-stockfish.wasm");
-      const workerSource = `
-        importScripts(${JSON.stringify(stockfishUrl)});
-      `;
-      const workerBlob = new Blob([workerSource], { type: "application/javascript" });
-      const workerUrl = URL.createObjectURL(workerBlob);
-
       this.worker = new Worker(`${workerUrl}#${encodeURIComponent(wasmUrl)}`);
-      URL.revokeObjectURL(workerUrl);
       this.phase = "boot";
       this.pending = null;
+      this._waitFor = null;
       this.searchQueue = Promise.resolve();
       this.worker.addEventListener("message", (event) => this.handleLine(String(event?.data ?? "")));
+      this.worker.addEventListener("error", (event) => {
+        const message = event?.message || "Local engine worker failed to start.";
+
+        if (this._waitFor) {
+          const waitFor = this._waitFor;
+          this._waitFor = null;
+          waitFor.reject(new Error(message));
+        }
+
+        if (this.pending) {
+          const pending = this.pending;
+          this.pending = null;
+          pending.resolve({
+            bestmove: "(none)",
+            score: pending.score,
+            pv: pending.pv
+          });
+        }
+      });
+    }
+
+    waitForToken(token, timeoutMs = 12000) {
+      return new Promise((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+          if (this._waitFor?.token === token) {
+            this._waitFor = null;
+            reject(new Error(`Local engine startup timed out while waiting for ${token}.`));
+          }
+        }, timeoutMs);
+
+        this._waitFor = {
+          token,
+          resolve: () => {
+            clearTimeout(timeoutId);
+            resolve();
+          },
+          reject: (error) => {
+            clearTimeout(timeoutId);
+            reject(error);
+          }
+        };
+      });
     }
 
     async init() {
-      await new Promise((resolve) => {
-        this._waitFor = { token: "uciok", resolve };
-        this.worker.postMessage("uci");
-      });
+      const uciReady = this.waitForToken("uciok");
+      this.worker.postMessage("uci");
+      await uciReady;
 
-      await new Promise((resolve) => {
-        this._waitFor = { token: "readyok", resolve };
-        this.worker.postMessage("isready");
-      });
+      const ready = this.waitForToken("readyok");
+      this.worker.postMessage("isready");
+      await ready;
 
       this.worker.postMessage("setoption name MultiPV value 1");
       this.worker.postMessage("ucinewgame");
@@ -4794,6 +4897,113 @@
     return Boolean(result && result !== "*");
   }
 
+  function buildMoveListFromPgn(pgnText) {
+    const parser = new Chess();
+
+    try {
+      parser.loadPgn(String(pgnText || "").trim(), { strict: false });
+    } catch {
+      throw new Error("That PGN could not be parsed.");
+    }
+
+    const headers = parser.getHeaders?.() || {};
+    const initialFen = headers.FEN || undefined;
+    const replay = initialFen ? new Chess(initialFen) : new Chess();
+    const verboseMoves = parser.history({ verbose: true });
+
+    if (!verboseMoves.length) {
+      throw new Error("No moves were found in that PGN.");
+    }
+
+    const moves = [];
+
+    verboseMoves.forEach((move, index) => {
+      const beforeFen = replay.fen();
+      const played = replay.move({
+        from: move.from,
+        to: move.to,
+        promotion: move.promotion || "q"
+      });
+
+      if (!played) {
+        throw new Error(`Illegal move encountered at ply ${index + 1}.`);
+      }
+
+      const previousMoveMeta = moves.length
+        ? {
+            color: moves[moves.length - 1].color,
+            from: moves[moves.length - 1].from,
+            to: moves[moves.length - 1].to,
+            san: moves[moves.length - 1].san,
+            uci: moves[moves.length - 1].uci,
+            wasCapture: Boolean(moves[moves.length - 1].capturedPiece),
+            wasCheck: /[+#]/.test(moves[moves.length - 1].san || "")
+          }
+        : null;
+
+      moves.push({
+        plyIndex: index,
+        moveNumber: toMoveNumber(index, played.color),
+        color: played.color,
+        beforeFen,
+        afterFen: replay.fen(),
+        from: played.from,
+        to: played.to,
+        uci: `${played.from}${played.to}${played.promotion || ""}`,
+        san: played.san,
+        capturedPiece: played.captured || null,
+        previousMoveMeta
+      });
+    });
+
+    return {
+      gameData: {
+        game: {
+          pgnHeaders: headers,
+          fen: initialFen
+        }
+      },
+      moves
+    };
+  }
+
+  function setLoadedInput(input) {
+    state.loadedInput = input;
+    state.currentGameId = input?.gameId || null;
+
+    if (state.analyzeButton) {
+      state.analyzeButton.disabled = !input;
+      state.analyzeButton.hidden = !input;
+    }
+  }
+
+  async function loadStoredImport(options = {}) {
+    try {
+      const { silent = false } = options;
+      const stored = await storageGet([IMPORT_STORAGE_KEY]);
+      const imported = stored?.[IMPORT_STORAGE_KEY];
+
+      if (!imported?.gameData) {
+        if (!silent) {
+          throw new Error("No imported Chess.com game was found yet. Use the popup on a finished game first.");
+        }
+        return;
+      }
+
+      setLoadedInput({
+        type: "chesscom",
+        gameData: imported.gameData,
+        moves: null,
+        requiresFinished: true,
+        viewerColor: imported.viewerColor || "w",
+        gameId: imported.gameId || null
+      });
+      setStatus("Imported Chess.com game loaded.");
+    } catch (error) {
+      setStatus(runtimeSafeMessage(error));
+    }
+  }
+
   function uciToSan(fen, uci) {
     if (!uci || uci === "(none)") {
       return "";
@@ -4837,33 +5047,32 @@
   async function runAnalysis() {
     try {
       ensureUi();
+      const input = state.loadedInput;
+
+      if (!input?.gameData) {
+        throw new Error("Open a finished Chess.com game and click the extension button to analyze it here.");
+      }
+
       resetAnalysisBoard();
-      state.root.classList.remove("crf-hidden");
-      state.launcher.classList.add("crf-hidden");
       state.analyzeButton.disabled = true;
-      setStatus("Loading Chess.com game data...");
+      setStatus("Preparing analysis...");
       setProgress(0, 1);
       state.summary.innerHTML = "";
       state.moves.innerHTML = "";
       renderChart([]);
       updateEvalBar(0);
+      state.currentGameId = input.gameId || null;
 
-      const gameId = parseGameId();
+      const gameData = input.gameData;
 
-      if (!gameId) {
-        throw new Error("Open a Chess.com live game page first.");
+      if (input.requiresFinished && !isFinishedGame(gameData)) {
+        throw new Error("This Chess.com import is not finished yet. Open a completed game first.");
       }
 
-      const gameData = await fetchGameData(gameId);
-
-      if (!isFinishedGame(gameData)) {
-        throw new Error("This extension only runs after the game has finished.");
-      }
-
-      state.viewerColor = resolveViewerColor(gameData);
+      state.viewerColor = input.viewerColor || "w";
       state.boardOrientation = viewerColorToBoardOrientation(state.viewerColor);
 
-      const moves = buildMoveList(gameData);
+      const moves = input.moves || buildMoveList(gameData);
       state.currentMoves = moves;
       state.currentResults = [];
       state.currentPlyIndex = 0;
@@ -4873,6 +5082,7 @@
         throw new Error("No moves were found for this game.");
       }
 
+      setStatus("Starting local engine...");
       const stockfish = await getStockfish();
       const profile = getAnalysisProfile(moves.length);
       const results = [];
@@ -4919,6 +5129,8 @@
           label,
           bestUci: best.bestmove,
           bestSan: uciToSan(move.beforeFen, best.bestmove),
+          replyUci: playedPosition.bestmove,
+          replySan: uciToSan(move.afterFen, playedPosition.bestmove),
           afterScore,
           bestScore,
           pvSan: pvToSan(move.beforeFen, best.pv)
@@ -4954,6 +5166,7 @@
       setProgress(moves.length, moves.length);
       renderBoardAtPly(0);
       setStatus(`Finished. Reviewed ${results.length} ply with a local Stockfish engine.`);
+      state.boardCard?.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (error) {
       console.error(error);
       setStatus(runtimeSafeMessage(error));
@@ -4964,27 +5177,60 @@
     }
   }
 
-  function maybeMount() {
-    if (state.destroyed) {
-      return;
-    }
-
+  async function getCurrentFinishedGamePayload() {
     const gameId = parseGameId();
+
     if (!gameId) {
-      return;
+      throw new Error("Open a Chess.com live game page first.");
     }
 
-    ensureUi();
-    state.viewerColor = resolveViewerColor({});
-    state.boardOrientation = viewerColorToBoardOrientation(state.viewerColor);
-    setStatus("Ready for post-game analysis.");
+    const gameData = await fetchGameData(gameId);
+
+    if (!isFinishedGame(gameData)) {
+      throw new Error("This extension only imports finished Chess.com games.");
+    }
+
+    const viewerColor = resolveViewerColor(gameData);
+    return {
+      gameId,
+      gameData,
+      viewerColor,
+      description: `Imported Chess.com game ${gameId}.`
+    };
   }
 
-  maybeMount();
-  window.addEventListener("popstate", () => setTimeout(maybeMount, RETRY_DELAY_MS));
-  new MutationObserver(() => {
-    if (!document.getElementById(LAUNCHER_ID)) {
-      maybeMount();
+  function registerImportListener() {
+    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+      if (message?.type !== "crf:get-finished-game") {
+        return false;
+      }
+
+      void getCurrentFinishedGamePayload()
+        .then((payload) => sendResponse({ ok: true, payload }))
+        .catch((error) => sendResponse({ ok: false, error: runtimeSafeMessage(error) }));
+
+      return true;
+    });
+  }
+
+  async function bootstrapAnalyzerPage() {
+    ensureUi();
+    state.analyzeButton.disabled = true;
+    setStatus("Open a finished Chess.com game and click the extension button to analyze it here.");
+    await loadStoredImport({ silent: true });
+    if (state.loadedInput?.gameData) {
+      state.viewerColor = state.loadedInput.viewerColor || "w";
+      state.boardOrientation = viewerColorToBoardOrientation(state.viewerColor);
+      void runAnalysis();
+    } else {
+      state.viewerColor = "w";
+      state.boardOrientation = viewerColorToBoardOrientation(state.viewerColor);
     }
-  }).observe(document.documentElement, { childList: true, subtree: true });
+  }
+
+  registerImportListener();
+
+  if (IS_ANALYZER_PAGE) {
+    void bootstrapAnalyzerPage();
+  }
 })();

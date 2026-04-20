@@ -3,15 +3,20 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Chess Review Free</title>
+    <title>Chess Move Coach</title>
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
-    <main>
-      <h1>Chess Review Free</h1>
-      <p>Open a finished Chess.com live game, then click <strong>Game Review</strong> to launch the full-screen recap.</p>
-      <p>This extension gives you one clear reason, blunder counts, and move-by-move coaching from a local Stockfish review.</p>
-      <span class="pill">Local Stockfish inside your browser</span>
+    <main class="popup-shell">
+      <h1>Chess Move Coach</h1>
+      <p class="lede">When you open the extension on a finished Chess.com game, it will import that game and open the analyzer outside Chess.com automatically.</p>
+      <div class="actions">
+        <button id="import-current-game" type="button">Analyze Current Game</button>
+        <button id="open-analyzer" type="button" class="secondary">Open Analyzer Only</button>
+      </div>
+      <p class="hint">If the current tab is not a finished Chess.com game, you can still open the analyzer page and load a game there.</p>
+      <p id="popup-status" class="status" aria-live="polite">Checking the current tab...</p>
     </main>
+    <script src="popup.js"></script>
   </body>
 </html>

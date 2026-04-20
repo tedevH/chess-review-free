@@ -1,17 +1,25 @@
 :root {
-  --crf-bg: #312e2b;
-  --crf-panel: #262421;
-  --crf-panel-soft: #2b2926;
-  --crf-border: rgba(255, 255, 255, 0.08);
-  --crf-text: #f0f0f0;
-  --crf-text-soft: #c8c3bc;
-  --crf-muted: #a8a29a;
-  --crf-accent: #81b64c;
-  --crf-accent-strong: #6fa13e;
-  --crf-good: #81b64c;
-  --crf-warn: #b88a4a;
-  --crf-bad: #a96354;
-  --crf-shadow: 0 8px 22px rgba(0, 0, 0, 0.16);
+  --crf-bg: #0f1724;
+  --crf-panel: #122033;
+  --crf-panel-soft: #18283d;
+  --crf-panel-elevated: rgba(14, 26, 43, 0.88);
+  --crf-card-lite: rgba(255, 255, 255, 0.06);
+  --crf-border: rgba(120, 174, 214, 0.18);
+  --crf-text: #edf6ff;
+  --crf-text-soft: #b9cade;
+  --crf-muted: #88a0b8;
+  --crf-accent: #45c7c1;
+  --crf-accent-strong: #23a6a0;
+  --crf-good: #46d39a;
+  --crf-warn: #f0b35a;
+  --crf-bad: #ef7984;
+  --crf-gold: #7be0dc;
+  --crf-shadow: 0 18px 48px rgba(3, 11, 24, 0.38);
+  --crf-board-light: #edf3fb;
+  --crf-board-dark: #607a96;
+  --crf-piece-light: #f7fbff;
+  --crf-piece-dark: #132033;
+  --crf-piece-stroke: #304762;
 }
 
 #crf-launcher {
@@ -62,8 +70,10 @@
   justify-content: space-between;
   gap: 12px;
   padding: 18px 18px 12px;
-  background: #f2ece1;
-  border-bottom: 1px solid rgba(88, 74, 52, 0.1);
+  background:
+    linear-gradient(135deg, rgba(69, 199, 193, 0.18), rgba(239, 121, 132, 0.1)),
+    var(--crf-panel-elevated);
+  border-bottom: 1px solid var(--crf-border);
   cursor: move;
 }
 
@@ -125,8 +135,8 @@
   padding: 12px 14px;
   border: 0;
   border-radius: 12px;
-  background: #374151;
-  color: #f8fafc;
+  background: linear-gradient(135deg, var(--crf-accent), var(--crf-accent-strong));
+  color: #06141e;
   font: 700 14px/1.2 inherit;
   cursor: pointer;
 }
@@ -185,9 +195,9 @@
 .crf-eval-bar {
   position: relative;
   overflow: hidden;
-  border: 1px solid rgba(88, 74, 52, 0.18);
+  border: 1px solid var(--crf-border);
   border-radius: 999px;
-  background: #2f2f2f;
+  background: #0a1422;
   min-height: 100%;
 }
 
@@ -197,7 +207,7 @@
   left: 0;
   width: 100%;
   height: 50%;
-  background: #f5f5f5;
+  background: linear-gradient(180deg, #f6fbff, #cfe1f7);
   transition: height 0.18s ease;
 }
 
@@ -214,7 +224,7 @@
   aspect-ratio: 1 / 1;
   width: 100%;
   overflow: hidden;
-  border: 1px solid rgba(88, 74, 52, 0.14);
+  border: 1px solid var(--crf-border);
   border-radius: 16px;
   opacity: 1 !important;
   filter: none !important;
@@ -227,7 +237,7 @@
   inset: 0;
   font-size: 11px;
   font-weight: 500;
-  color: #c8c3bc;
+  color: var(--crf-text-soft);
   user-select: none;
 }
 
@@ -237,7 +247,7 @@
   display: inline-block;
   font-size: 11px;
   font-weight: 500;
-  color: rgba(200, 195, 188, 0.9);
+  color: rgba(185, 202, 222, 0.92);
   background: transparent;
   border: none;
   box-shadow: none;
@@ -265,11 +275,11 @@
 }
 
 .crf-square-light {
-  background: #f3e8cf;
+  background: var(--crf-board-light);
 }
 
 .crf-square-dark {
-  background: #8b6b47;
+  background: var(--crf-board-dark);
 }
 
 .crf-piece {
@@ -283,23 +293,23 @@
 }
 
 .crf-piece-w {
-  color: #f7f4ee;
+  color: var(--crf-piece-light);
   opacity: 1 !important;
   filter: none !important;
   mix-blend-mode: normal !important;
-  -webkit-text-fill-color: #f7f4ee;
-  -webkit-text-stroke: 0.52px #2c241a;
+  -webkit-text-fill-color: var(--crf-piece-light);
+  -webkit-text-stroke: 0.52px var(--crf-piece-stroke);
   text-shadow: none;
   -webkit-font-smoothing: antialiased;
   text-rendering: geometricPrecision;
 }
 
 .crf-piece-w.crf-piece-type-p {
-  -webkit-text-stroke: 0.8px #241d15;
+  -webkit-text-stroke: 0.8px var(--crf-piece-stroke);
 }
 
 .crf-piece-b {
-  color: #1d1b18;
+  color: var(--crf-piece-dark);
   opacity: 1 !important;
   filter: none !important;
   mix-blend-mode: normal !important;
@@ -319,7 +329,7 @@ svg path {
 }
 
 .crf-square-selected {
-  box-shadow: inset 0 0 0 3px rgba(59, 130, 246, 0.7);
+  box-shadow: inset 0 0 0 3px rgba(69, 199, 193, 0.78);
 }
 
 .crf-square-target::after {
@@ -328,7 +338,7 @@ svg path {
   width: 18px;
   height: 18px;
   border-radius: 999px;
-  background: rgba(15, 23, 42, 0.2);
+  background: rgba(69, 199, 193, 0.3);
 }
 
 .crf-square-sticker {
@@ -369,8 +379,8 @@ svg path {
 .crf-coach-panel {
   padding: 18px;
   border-radius: 20px;
-  background: rgba(15, 23, 42, 0.72);
-  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: linear-gradient(180deg, rgba(17, 31, 49, 0.96), rgba(11, 20, 34, 0.96));
+  border: 1px solid var(--crf-border);
   min-height: 100%;
   display: flex;
   flex-direction: column;
@@ -391,8 +401,8 @@ svg path {
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  background: #3b3734;
-  color: #c2a878;
+  background: rgba(69, 199, 193, 0.12);
+  color: var(--crf-gold);
   font-size: 38px;
   box-shadow: none;
   animation: none;
@@ -402,16 +412,16 @@ svg path {
   font-size: 16px;
   font-weight: 800;
   line-height: 1.35;
-  color: #93c5fd;
+  color: var(--crf-accent);
 }
 
 .crf-coach-explanation {
   margin-top: 10px;
-  color: #f8fafc;
+  color: var(--crf-text);
   font-size: 16px;
   line-height: 1.72;
   padding-top: 12px;
-  border-top: 1px solid rgba(148, 163, 184, 0.14);
+  border-top: 1px solid var(--crf-border);
 }
 
 @keyframes crf-coach-float {
@@ -421,9 +431,9 @@ svg path {
 
 .crf-nav {
   padding: 8px 12px;
-  border: 1px solid rgba(88, 74, 52, 0.16);
+  border: 1px solid var(--crf-border);
   border-radius: 10px;
-  background: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
   color: var(--crf-text);
   font: 600 12px/1.2 inherit;
   cursor: pointer;
@@ -437,8 +447,8 @@ svg path {
 .crf-stat {
   padding: 12px;
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.7);
-  border: 1px solid rgba(88, 74, 52, 0.12);
+  background: var(--crf-card-lite);
+  border: 1px solid var(--crf-border);
 }
 
 .crf-stat-label {
@@ -460,22 +470,22 @@ svg path {
   width: 100%;
   height: 120px;
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.68);
-  border: 1px solid rgba(88, 74, 52, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--crf-border);
 }
 
 .crf-progress {
   margin-top: 10px;
   height: 8px;
   border-radius: 999px;
-  background: rgba(88, 74, 52, 0.12);
+  background: rgba(255, 255, 255, 0.08);
   overflow: hidden;
 }
 
 .crf-progress-bar {
   height: 100%;
   width: 0;
-  background: #4b5563;
+  background: linear-gradient(90deg, var(--crf-accent), #8fe3df);
   transition: width 0.15s ease;
 }
 
@@ -487,15 +497,15 @@ svg path {
 
 .crf-move {
   padding: 12px;
-  border: 1px solid rgba(88, 74, 52, 0.1);
+  border: 1px solid var(--crf-border);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.76);
+  background: rgba(255, 255, 255, 0.05);
   cursor: pointer;
 }
 
 .crf-move-active {
-  border-color: rgba(55, 65, 81, 0.45);
-  box-shadow: inset 0 0 0 1px rgba(55, 65, 81, 0.16);
+  border-color: rgba(69, 199, 193, 0.44);
+  box-shadow: inset 0 0 0 1px rgba(69, 199, 193, 0.18);
 }
 
 .crf-move-top {
