@@ -3389,7 +3389,7 @@
       <div class="crf-header">
         <div>
           <h1 class="crf-page-title">Chess Analysis Studio</h1>
-          <p class="crf-subtitle">General-purpose local analysis with optional game import from supported pages.</p>
+          <p class="crf-subtitle">General-purpose local analysis with optional game import and direct PGN input.</p>
         </div>
       </div>
       <div class="crf-scroll">
@@ -3397,12 +3397,12 @@
           <div class="crf-hero-main">
             <div class="crf-result-badge" id="crf-result-badge" data-result="draw">Local Analysis</div>
             <div class="crf-reason-label" id="crf-reason-label">Ready to analyze</div>
-            <div class="crf-reason-text" id="crf-reason-text">Use the current tab import when available, or load a PGN directly to analyze the game locally.</div>
+            <div class="crf-reason-text" id="crf-reason-text">Import a game when available, or load a PGN directly to analyze it locally.</div>
             <button class="crf-cta" id="crf-analyze" type="button" hidden>Run Analysis Again</button>
             <div class="crf-progress">
               <div class="crf-progress-bar" id="crf-progress-bar"></div>
             </div>
-            <p class="crf-muted" id="crf-status">Analyze the current game from the popup, or paste or upload a PGN here.</p>
+            <p class="crf-muted" id="crf-status">Start from the popup import flow, or paste or upload a PGN here.</p>
           </div>
           <div class="crf-hero-side">
             <div class="crf-hero-stat">
@@ -3422,7 +3422,7 @@
         <section class="crf-card">
           <div class="crf-row">
             <strong>Game Input</strong>
-            <span class="crf-muted">Paste PGN, upload a file, or use current-tab import from the popup</span>
+            <span class="crf-muted">Paste PGN, upload a file, or start an import from the popup</span>
           </div>
           <textarea id="crf-pgn-input" class="crf-pgn-input" spellcheck="false" placeholder="[Event &quot;Casual Game&quot;]
 [Site &quot;Local&quot;]
@@ -3569,7 +3569,7 @@
     setReviewHero(
       {
         result: "draw",
-        reasonText: "Load a PGN or import the current tab from the popup to begin a full analysis here.",
+        reasonText: "Load a PGN or start an import from the popup to begin a full analysis here.",
         adviceText: "After analysis runs, this workspace will show one practical fix to carry into your next game.",
         blunders: 0,
         mistakes: 0,

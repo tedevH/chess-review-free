@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Chess Analysis Studio",
   "version": "0.1.6",
-  "description": "General-purpose local chess analysis with optional PGN and current-tab game import.",
+  "description": "General-purpose local chess analysis with PGN input and optional game import.",
   "permissions": [
     "activeTab",
     "scripting",
