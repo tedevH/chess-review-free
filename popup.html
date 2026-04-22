@@ -3,17 +3,18 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Chess Move Coach</title>
+    <title>Chess Analysis Studio</title>
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
     <main class="popup-shell">
-      <h1>Chess Move Coach</h1>
-      <p class="lede">Open the standalone analyzer to paste a PGN and review the game locally with the bundled engine.</p>
+      <h1>Chess Analysis Studio</h1>
+      <p class="lede">Analyze a game from the current tab when available, or open the standalone analyzer for PGN paste and file upload.</p>
       <div class="actions">
-        <button id="open-analyzer" type="button">Open Analyzer</button>
+        <button id="analyze-current-game" type="button">Analyze Current Game</button>
+        <button id="open-analyzer" type="button" class="secondary">Open Analyzer</button>
       </div>
-      <p class="hint">Paste a PGN into the analyzer page to run a full move-by-move review without sending game data to any external server.</p>
+      <p class="hint">Supported site import is optional. The analyzer also works independently with pasted or uploaded PGN files.</p>
       <p id="popup-status" class="status" aria-live="polite">Ready.</p>
     </main>
     <script src="popup.js"></script>

@@ -25,7 +25,7 @@
 
   function runtimeSafeMessage(error, fallback = "Analysis failed.") {
     if (isContextInvalidatedError(error) || !isExtensionContextValid()) {
-      return "The extension was reloaded. Refresh the page and run the review again.";
+      return "The extension was reloaded. Refresh the page and run the analysis again.";
     }
 
     return error instanceof Error ? error.message : fallback;
@@ -35,11 +35,12 @@
   try {
     ({ Chess } = await import(safeRuntimeGetURL("vendor-chess.js")));
   } catch (error) {
-    console.error("Failed to initialize Chess Move Coach", error);
+    console.error("Failed to initialize Chess Analysis Studio", error);
     return;
   }
 
   const PANEL_ID = "crf-root";
+  const PENDING_IMPORT_STORAGE_KEY = "casPendingImport";
   const IS_ANALYZER_PAGE = window.location.pathname.endsWith("/analyzer.html");
 
   const state = {
@@ -60,6 +61,8 @@
     analyzeButton: null,
     pgnInput: null,
     loadPgnButton: null,
+    uploadPgnButton: null,
+    pgnFileInput: null,
     boardCard: null,
     board: null,
     boardCoordinates: null,
@@ -99,6 +102,32 @@
 
   function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
+  }
+
+  function storageGet(keys) {
+    return new Promise((resolve, reject) => {
+      chrome.storage.local.get(keys, (value) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+
+        resolve(value);
+      });
+    });
+  }
+
+  function storageRemove(keys) {
+    return new Promise((resolve, reject) => {
+      chrome.storage.local.remove(keys, () => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+
+        resolve();
+      });
+    });
   }
 
   function escapeHtml(value) {
@@ -3113,7 +3142,7 @@
         ? `On ${movePrefix}, the position turned against you for concrete tactical reasons.`
         : `On ${movePrefix}, the game finally tipped your way and you kept the edge.`,
       lesson: "The biggest lesson is hidden in one critical moment, not in every small inaccuracy.",
-      advice: "Review the biggest swing first, then focus on one habit you can repeat next game."
+      advice: "Study the biggest swing first, then focus on one habit you can repeat next game."
     };
   }
 
@@ -3287,7 +3316,7 @@
             : result === "win"
               ? "You handled the key moments better than your opponent."
               : "The game came down to a few balanced turning points.",
-          lesson: "The most useful review starts with the single biggest swing.",
+          lesson: "The most useful analysis starts with the single biggest swing.",
           advice: "Focus on one repeatable habit from this game before looking at everything else."
         };
 
@@ -3359,21 +3388,21 @@
     root.innerHTML = `
       <div class="crf-header">
         <div>
-          <h1 class="crf-page-title">Chess Move Coach</h1>
-          <p class="crf-subtitle">Standalone review with a local Stockfish engine in its own tab.</p>
+          <h1 class="crf-page-title">Chess Analysis Studio</h1>
+          <p class="crf-subtitle">General-purpose local analysis with optional game import from supported pages.</p>
         </div>
       </div>
       <div class="crf-scroll">
         <section class="crf-hero">
           <div class="crf-hero-main">
-            <div class="crf-result-badge" id="crf-result-badge" data-result="draw">Independent Analysis</div>
+            <div class="crf-result-badge" id="crf-result-badge" data-result="draw">Local Analysis</div>
             <div class="crf-reason-label" id="crf-reason-label">Ready to analyze</div>
-            <div class="crf-reason-text" id="crf-reason-text">Paste a PGN below to load a game and run a full local analysis.</div>
+            <div class="crf-reason-text" id="crf-reason-text">Use the current tab import when available, or load a PGN directly to analyze the game locally.</div>
             <button class="crf-cta" id="crf-analyze" type="button" hidden>Run Analysis Again</button>
             <div class="crf-progress">
               <div class="crf-progress-bar" id="crf-progress-bar"></div>
             </div>
-            <p class="crf-muted" id="crf-status">Paste a PGN to start analyzing this game locally.</p>
+            <p class="crf-muted" id="crf-status">Analyze the current game from the popup, or paste or upload a PGN here.</p>
           </div>
           <div class="crf-hero-side">
             <div class="crf-hero-stat">
@@ -3385,15 +3414,15 @@
               <span class="crf-hero-stat-value" id="crf-mistake-stat">0</span>
             </div>
             <div class="crf-focus-card">
-              <div class="crf-reason-label" id="crf-focus-label">What to work on next</div>
+              <div class="crf-reason-label" id="crf-focus-label">Next insight</div>
               <div class="crf-focus-text" id="crf-focus-text">The analyzer will turn the biggest swing into one practical improvement to carry into your next game.</div>
             </div>
           </div>
         </section>
         <section class="crf-card">
           <div class="crf-row">
-            <strong>Load PGN</strong>
-            <span class="crf-muted">Paste one full game score to analyze it locally</span>
+            <strong>Game Input</strong>
+            <span class="crf-muted">Paste PGN, upload a file, or use current-tab import from the popup</span>
           </div>
           <textarea id="crf-pgn-input" class="crf-pgn-input" spellcheck="false" placeholder="[Event &quot;Casual Game&quot;]
 [Site &quot;Local&quot;]
@@ -3402,7 +3431,9 @@
 1. e4 e5 2. Nf3 Nc6 3. Bb5 a6"></textarea>
           <div class="crf-board-actions">
             <button class="crf-nav" id="crf-load-pgn" type="button">Load PGN</button>
+            <button class="crf-nav" id="crf-upload-pgn" type="button">Upload PGN File</button>
           </div>
+          <input id="crf-pgn-file" type="file" accept=".pgn,text/plain,application/x-chess-pgn" hidden />
         </section>
         <section class="crf-card">
           <div class="crf-row">
@@ -3436,7 +3467,7 @@
               <div class="crf-coach-avatar" aria-hidden="true">
                 <div class="crf-coach-logo">♞</div>
               </div>
-              <div class="crf-coach-label" id="crf-coach-label">Move Coach</div>
+              <div class="crf-coach-label" id="crf-coach-label">Move Insights</div>
               <div class="crf-coach-explanation" id="crf-coach-explanation">Pick a move on the board or in the move list to see why it was labeled best, good, inaccuracy, mistake, or blunder.</div>
             </aside>
           </div>
@@ -3495,6 +3526,8 @@
     state.chart = root.querySelector("#crf-chart");
     state.pgnInput = root.querySelector("#crf-pgn-input");
     state.loadPgnButton = root.querySelector("#crf-load-pgn");
+    state.uploadPgnButton = root.querySelector("#crf-upload-pgn");
+    state.pgnFileInput = root.querySelector("#crf-pgn-file");
     state.board = root.querySelector("#crf-board");
     state.boardCoordinates = root.querySelector("#crf-board-coordinates");
     state.boardCaption = root.querySelector("#crf-board-caption");
@@ -3513,6 +3546,12 @@
     state.loadPgnButton.addEventListener("click", () => {
       void loadPgnFromTextarea();
     });
+    state.uploadPgnButton.addEventListener("click", () => {
+      state.pgnFileInput?.click();
+    });
+    state.pgnFileInput.addEventListener("change", () => {
+      void loadPgnFromFile(state.pgnFileInput?.files?.[0] || null);
+    });
     state.prevMoveButton.addEventListener("click", () => stepBoard(-1));
     state.nextMoveButton.addEventListener("click", () => stepBoard(1));
     state.engineMoveButton.addEventListener("click", () => {
@@ -3530,7 +3569,7 @@
     setReviewHero(
       {
         result: "draw",
-        reasonText: "Paste a PGN to load a game and open a full analysis here.",
+        reasonText: "Load a PGN or import the current tab from the popup to begin a full analysis here.",
         adviceText: "After analysis runs, this workspace will show one practical fix to carry into your next game.",
         blunders: 0,
         mistakes: 0,
@@ -3622,7 +3661,7 @@
     }
 
     if (!move) {
-      state.coachLabel.textContent = "Move Coach";
+      state.coachLabel.textContent = "Move Insights";
       state.coachExplanation.textContent = "Pick a move on the board or in the move list to see exactly why it was labeled best, good, inaccuracy, mistake, or blunder.";
       return;
     }
@@ -4404,8 +4443,107 @@
     renderBoardAtPly(state.currentPlyIndex);
   }
 
+  function decodeCompactMoveList(compactMoves) {
+    const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!?{~}(^)[_]@#$,./&-*++=";
+    const promoPieces = "qnrbkp";
+    const moves = [];
+
+    function indexToSquare(index) {
+      const file = index % 8;
+      const rank = Math.floor(index / 8) + 1;
+      return `${"abcdefgh"[file]}${rank}`;
+    }
+
+    for (let index = 0; index < compactMoves.length; index += 2) {
+      let code1 = alphabet.indexOf(compactMoves[index]);
+      let code2 = alphabet.indexOf(compactMoves[index + 1]);
+      const move = {};
+
+      if (code1 < 0 || code2 < 0) {
+        throw new Error("The imported game data could not be decoded.");
+      }
+
+      if (code2 > 63) {
+        const promoIndex = Math.floor((code2 - 64) / 3);
+        move.promotion = promoPieces[promoIndex];
+        const offset = ((code2 - 1) % 3) - 1;
+        const direction = code1 < 16 ? -8 : 8;
+        code2 = code1 + direction + offset;
+      }
+
+      if (code1 > 75) {
+        move.drop = promoPieces[code1 - 79];
+      } else {
+        move.from = indexToSquare(code1);
+      }
+
+      move.to = indexToSquare(code2);
+      moves.push(move);
+    }
+
+    return moves;
+  }
+
   function toMoveNumber(plyIndex, color) {
     return color === "w" ? Math.floor(plyIndex / 2) + 1 : Math.ceil((plyIndex + 1) / 2);
+  }
+
+  function buildMoveListFromImportedData(gameData) {
+    const compactMoves = gameData?.game?.moveList;
+
+    if (!compactMoves) {
+      throw new Error("The imported game data did not contain a readable move list.");
+    }
+
+    const initialFen = gameData?.game?.fen || undefined;
+    const chess = initialFen ? new Chess(initialFen) : new Chess();
+    const decodedMoves = decodeCompactMoveList(compactMoves);
+    const moves = [];
+
+    decodedMoves.forEach((move, index) => {
+      if (move.drop) {
+        throw new Error("Drop moves are not supported in this analyzer.");
+      }
+
+      const beforeFen = chess.fen();
+      const played = chess.move({
+        from: move.from,
+        to: move.to,
+        promotion: move.promotion || "q"
+      });
+
+      if (!played) {
+        throw new Error(`Illegal move encountered at ply ${index + 1}.`);
+      }
+
+      const previousMoveMeta = moves.length
+        ? {
+            color: moves[moves.length - 1].color,
+            from: moves[moves.length - 1].from,
+            to: moves[moves.length - 1].to,
+            san: moves[moves.length - 1].san,
+            uci: moves[moves.length - 1].uci,
+            wasCapture: Boolean(moves[moves.length - 1].capturedPiece),
+            wasCheck: /[+#]/.test(moves[moves.length - 1].san || "")
+          }
+        : null;
+
+      moves.push({
+        plyIndex: index,
+        moveNumber: toMoveNumber(index, played.color),
+        color: played.color,
+        beforeFen,
+        afterFen: chess.fen(),
+        from: played.from,
+        to: played.to,
+        uci: `${played.from}${played.to}${played.promotion || ""}`,
+        san: played.san,
+        capturedPiece: played.captured || null,
+        previousMoveMeta
+      });
+    });
+
+    return moves;
   }
 
   class StockfishClient {
@@ -4686,6 +4824,72 @@
     }
   }
 
+  async function loadPgnFromFile(file) {
+    try {
+      if (!file) {
+        return;
+      }
+
+      const pgnText = await file.text();
+      if (state.pgnInput) {
+        state.pgnInput.value = pgnText;
+      }
+
+      await loadPgnFromTextarea();
+    } catch (error) {
+      setStatus(runtimeSafeMessage(error, "Could not load that PGN file."));
+    } finally {
+      if (state.pgnFileInput) {
+        state.pgnFileInput.value = "";
+      }
+    }
+  }
+
+  async function loadPendingImport() {
+    const stored = await storageGet([PENDING_IMPORT_STORAGE_KEY]);
+    const pendingImport = stored?.[PENDING_IMPORT_STORAGE_KEY];
+
+    if (!pendingImport) {
+      return false;
+    }
+
+    await storageRemove([PENDING_IMPORT_STORAGE_KEY]);
+
+    if (pendingImport.format === "pgn") {
+      if (state.pgnInput) {
+        state.pgnInput.value = pendingImport.pgnText || "";
+      }
+
+      const parsed = buildMoveListFromPgn(pendingImport.pgnText || "");
+      const viewerColor = pendingImport.viewerColor || inferViewerColorFromHeaders(parsed.gameData?.game?.pgnHeaders || {});
+
+      setLoadedInput({
+        type: pendingImport.provider || "pgn",
+        gameData: parsed.gameData,
+        moves: parsed.moves,
+        viewerColor,
+        gameId: pendingImport.gameId || `pgn-${Date.now()}`
+      });
+    } else {
+      const viewerColor =
+        pendingImport.viewerColor || inferViewerColorFromHeaders(pendingImport.gameData?.game?.pgnHeaders || {});
+
+      setLoadedInput({
+        type: pendingImport.provider || "import",
+        gameData: pendingImport.gameData,
+        moves: null,
+        viewerColor,
+        gameId: pendingImport.gameId || `import-${Date.now()}`
+      });
+    }
+
+    state.viewerColor = state.loadedInput.viewerColor || "w";
+    state.boardOrientation = viewerColorToBoardOrientation(state.viewerColor);
+    setStatus(`Imported game data from ${pendingImport.provider === "lichess" ? "Lichess" : "the current tab"}. Starting analysis...`);
+    await runAnalysis();
+    return true;
+  }
+
   function uciToSan(fen, uci) {
     if (!uci || uci === "(none)") {
       return "";
@@ -4750,7 +4954,7 @@
       state.viewerColor = input.viewerColor || "w";
       state.boardOrientation = viewerColorToBoardOrientation(state.viewerColor);
 
-      const moves = input.moves;
+      const moves = input.moves || buildMoveListFromImportedData(gameData);
       state.currentMoves = moves;
       state.currentResults = [];
       state.currentPlyIndex = 0;
@@ -4843,7 +5047,7 @@
       setReviewHero(reviewSummary);
       setProgress(moves.length, moves.length);
       renderBoardAtPly(0);
-      setStatus(`Finished. Reviewed ${results.length} ply with a local Stockfish engine.`);
+      setStatus(`Finished. Analyzed ${results.length} ply with the local Stockfish engine.`);
       state.boardCard?.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (error) {
       console.error(error);
@@ -4860,7 +5064,10 @@
     state.analyzeButton.disabled = true;
     state.viewerColor = "w";
     state.boardOrientation = viewerColorToBoardOrientation(state.viewerColor);
-    setStatus("Paste a PGN to start analyzing this game locally.");
+    setStatus("Analyze the current game from the popup, or paste or upload a PGN here.");
+    if (await loadPendingImport()) {
+      return;
+    }
   }
 
   if (IS_ANALYZER_PAGE) {

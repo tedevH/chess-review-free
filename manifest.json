@@ -1,10 +1,15 @@
 {
   "manifest_version": 3,
-  "name": "Chess Move Coach",
+  "name": "Chess Analysis Studio",
   "version": "0.1.6",
-  "description": "Standalone local chess analysis workspace with manual PGN review.",
+  "description": "General-purpose local chess analysis with optional PGN and current-tab game import.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
   "action": {
-    "default_title": "Chess Move Coach",
+    "default_title": "Chess Analysis Studio",
     "default_popup": "popup.html"
   },
   "content_security_policy": {
