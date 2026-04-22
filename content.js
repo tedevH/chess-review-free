@@ -3786,6 +3786,11 @@
   }
 
   function normalizeScoreForFen(score, fen) {
+    const terminalScore = terminalScoreForFen(fen);
+    if (terminalScore) {
+      return terminalScore;
+    }
+
     if (!score) {
       return { unit: "cp", value: 0 };
     }
@@ -3807,6 +3812,33 @@
       unit: score.unit,
       value: score.value * flip
     };
+  }
+
+  function terminalScoreForFen(fen) {
+    if (!fen) {
+      return null;
+    }
+
+    try {
+      const chess = new Chess(fen);
+
+      if (typeof chess.isCheckmate === "function" && chess.isCheckmate()) {
+        const winner = chess.turn() === "w" ? "b" : "w";
+        return { unit: "mate", value: winner === "w" ? 1 : -1 };
+      }
+
+      const isDraw =
+        (typeof chess.isStalemate === "function" && chess.isStalemate()) ||
+        (typeof chess.isDraw === "function" && chess.isDraw());
+
+      if (isDraw) {
+        return { unit: "cp", value: 0 };
+      }
+    } catch {
+      return null;
+    }
+
+    return null;
   }
 
   function perspectiveScoreForColor(score, color) {
@@ -4411,7 +4443,7 @@
 
     if (state.analysisSelectedSquare) {
       const selectedMoves = chess.moves({ square: state.analysisSelectedSquare, verbose: true });
-      const chosenMove = selectedMoves.find((move) => move.to === square) || null;
+      const chosenMove = chooseAnalysisMoveForTarget(selectedMoves, square);
 
       if (chosenMove) {
         await applyAnalysisMove({
@@ -4441,6 +4473,42 @@
     state.analysisSelectedSquare = square;
     state.analysisLegalTargets = legalMoves.map((move) => move.to);
     renderBoardAtPly(state.currentPlyIndex);
+  }
+
+  function chooseAnalysisMoveForTarget(selectedMoves, targetSquare) {
+    const candidateMoves = selectedMoves.filter((move) => move.to === targetSquare);
+
+    if (!candidateMoves.length) {
+      return null;
+    }
+
+    if (candidateMoves.length === 1) {
+      return candidateMoves[0];
+    }
+
+    const promotionMoves = candidateMoves.filter((move) => move.promotion);
+    if (!promotionMoves.length) {
+      return candidateMoves[0];
+    }
+
+    const choice = window.prompt(
+      "Choose promotion piece: q (queen), r (rook), b (bishop), or n (knight)",
+      "q"
+    );
+
+    if (choice == null) {
+      return null;
+    }
+
+    const normalizedChoice = String(choice).trim().toLowerCase();
+    const selectedPromotion = promotionMoves.find((move) => move.promotion === normalizedChoice);
+
+    if (selectedPromotion) {
+      return selectedPromotion;
+    }
+
+    setStatus("Invalid promotion choice. Use q, r, b, or n.");
+    return null;
   }
 
   function decodeCompactMoveList(compactMoves) {
