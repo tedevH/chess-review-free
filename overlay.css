@@ -863,7 +863,7 @@ svg path {
   }
 }
 
-/* Chess.com-inspired visual refresh */
+/* Board review visual refresh */
 
 #crf-root {
   background: var(--crf-bg);

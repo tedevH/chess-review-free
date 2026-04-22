@@ -2,45 +2,13 @@
   "manifest_version": 3,
   "name": "Chess Move Coach",
   "version": "0.1.6",
-  "description": "Independent local chess analysis workspace with optional Chess.com game import.",
-  "permissions": [
-    "storage",
-    "scripting"
-  ],
-  "host_permissions": [
-    "https://www.chess.com/*"
-  ],
+  "description": "Standalone local chess analysis workspace with manual PGN review.",
   "action": {
-    "default_title": "Chess Move Coach"
-  },
-  "background": {
-    "service_worker": "background.js"
+    "default_title": "Chess Move Coach",
+    "default_popup": "popup.html"
   },
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
   },
-  "content_scripts": [
-    {
-      "matches": [
-        "https://www.chess.com/game/live/*",
-        "https://www.chess.com/analysis/game/live/*"
-      ],
-      "js": [
-        "content.js"
-      ],
-      "run_at": "document_idle"
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "vendor-chess.js",
-        "vendor-stockfish.js",
-        "vendor-stockfish.wasm"
-      ],
-      "matches": [
-        "https://www.chess.com/*"
-      ]
-    }
-  ]
+  "web_accessible_resources": []
 }

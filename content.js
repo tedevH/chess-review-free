@@ -40,7 +40,6 @@
   }
 
   const PANEL_ID = "crf-root";
-  const IMPORT_STORAGE_KEY = "crfImportedGame";
   const IS_ANALYZER_PAGE = window.location.pathname.endsWith("/analyzer.html");
 
   const state = {
@@ -59,6 +58,8 @@
     moves: null,
     chart: null,
     analyzeButton: null,
+    pgnInput: null,
+    loadPgnButton: null,
     boardCard: null,
     board: null,
     boardCoordinates: null,
@@ -96,19 +97,6 @@
     destroyed: false
   };
 
-  function storageGet(keys) {
-    return new Promise((resolve, reject) => {
-      chrome.storage.local.get(keys, (value) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-          return;
-        }
-
-        resolve(value);
-      });
-    });
-  }
-
   function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
   }
@@ -138,7 +126,7 @@
     }
   }
 
-  function tryReadChessComBoardFen() {
+  function tryReadEmbeddedBoardFen() {
     const el = document.querySelector("chess-board");
     if (!el) {
       return null;
@@ -336,11 +324,9 @@
       return preferredSquare;
     }
 
-    // Sync with Chess.com's main board: our currentPlyIndex only changes via this
-    // panel's controls, so stepping on Chess.com left us on ply 0 with a different
-    // visible position. Infer ply from FEN, or use the live FEN when it does not
-    // match our game line (still lets you sandbox from what you see).
-    const liveFen = tryReadChessComBoardFen();
+    // If an embedded board widget is present, infer the visible ply from its FEN.
+    // Otherwise fall back to the currently selected move in the analyzer.
+    const liveFen = tryReadEmbeddedBoardFen();
     const normalizedLive = liveFen ? tryNormalizeFen(liveFen) : null;
     let inferredFromLive = null;
 
@@ -369,23 +355,6 @@
 
     return preferredSquare;
   }
-
-  function parseGameId() {
-    const patterns = [
-      /\/game\/live\/(\d+)/,
-      /\/analysis\/game\/live\/(\d+)/
-    ];
-
-    for (const pattern of patterns) {
-      const match = window.location.pathname.match(pattern);
-      if (match) {
-        return match[1];
-      }
-    }
-
-    return null;
-  }
-
   function getAnalysisProfile(moveCount) {
     if (moveCount >= 50) {
       return {
@@ -3323,7 +3292,7 @@
         };
 
     return {
-      gameId: state.currentGameId || parseGameId() || `${Date.now()}`,
+      gameId: state.currentGameId || `analysis-${Date.now()}`,
       date: Date.now(),
       result,
       color: state.viewerColor === "b" ? "black" : "white",
@@ -3358,35 +3327,6 @@
     return viewerColor === "b" ? "black" : "white";
   }
 
-  function detectBoardOrientation() {
-    const boardElement = document.querySelector("chess-board");
-    if (!boardElement) {
-      return "white";
-    }
-
-    const o = boardElement.orientation;
-    if (o === "black" || o === "b") {
-      return "black";
-    }
-    if (o === "white" || o === "w") {
-      return "white";
-    }
-
-    const attr = boardElement.getAttribute?.("orientation");
-    if (attr === "black" || attr === "b") {
-      return "black";
-    }
-    if (attr === "white" || attr === "w") {
-      return "white";
-    }
-
-    if (boardElement.classList.contains("flipped")) {
-      return "black";
-    }
-
-    return "white";
-  }
-
   function normalizeHeaderName(name) {
     if (!name) {
       return "";
@@ -3397,175 +3337,12 @@
       .toLowerCase();
   }
 
-  function syncPageContextViewerIdentity() {
-    // Intentionally blank. Injecting an inline page script here violates
-    // Chrome extension CSP on Chess.com, so we fall back to DOM scraping.
-  }
-
-  function scrapeUsernameFromChessDom() {
-    const hrefSelectors = [
-      "a.user-usernameComponent",
-      "a[class*='usernameComponent']",
-      "[data-testid='user-username'] a",
-      "nav a[href^='/member/']",
-      "#header a[href^='/member/']",
-      "a[href^='/member/']",
-      "a[href*='chess.com/member/']"
-    ];
-
-    for (const sel of hrefSelectors) {
-      for (const el of document.querySelectorAll(sel)) {
-        const href = el.getAttribute("href") || "";
-        const m = href.match(/\/member\/([^/?#]+)/i);
-        if (m) {
-          try {
-            return decodeURIComponent(m[1]).trim().toLowerCase();
-          } catch {
-            return m[1].trim().toLowerCase();
-          }
-        }
-      }
-    }
-
-    return "";
-  }
-
-  function getViewerUsernameFromPage() {
-    return scrapeUsernameFromChessDom();
-  }
-
-  function getViewerIdFromPage() {
-    return null;
-  }
-
-  function usernameMatchesHeader(username, headerNormalized) {
-    if (!username || !headerNormalized) {
-      return false;
-    }
-    if (username === headerNormalized) {
-      return true;
-    }
-    const parts = headerNormalized.split(/\s+/).filter(Boolean);
-    const last = parts[parts.length - 1];
-    if (last && last === username) {
-      return true;
-    }
-    if (headerNormalized.includes(username)) {
-      return true;
-    }
-    return false;
-  }
-
-  function parseViewerColorFromGameData(gameData) {
-    const game = gameData?.game;
-    if (!game) {
-      return null;
-    }
-
-    const me = getViewerUsernameFromPage();
-
-    const headers = game.pgnHeaders || {};
-    const whiteHeader = normalizeHeaderName(headers.White);
-    const blackHeader = normalizeHeaderName(headers.Black);
-
-    if (me && usernameMatchesHeader(me, whiteHeader)) {
-      return "w";
-    }
-    if (me && usernameMatchesHeader(me, blackHeader)) {
+  function inferViewerColorFromHeaders(headers) {
+    const orientation = normalizeHeaderName(headers?.Orientation || headers?.View || "");
+    if (orientation === "black" || orientation === "b") {
       return "b";
     }
-
-    const whiteFromApi = normalizeHeaderName(
-      String(
-        game.whiteUsername ||
-          game.whiteMember?.username ||
-          game.whitePlayer?.username ||
-          (typeof game.white === "string" ? game.white : game.white?.username || "")
-      )
-    );
-    const blackFromApi = normalizeHeaderName(
-      String(
-        game.blackUsername ||
-          game.blackMember?.username ||
-          game.blackPlayer?.username ||
-          (typeof game.black === "string" ? game.black : game.black?.username || "")
-      )
-    );
-    if (me && whiteFromApi && usernameMatchesHeader(me, whiteFromApi)) {
-      return "w";
-    }
-    if (me && blackFromApi && usernameMatchesHeader(me, blackFromApi)) {
-      return "b";
-    }
-
-    const pc = game.playerColor ?? game.myColor ?? game.side ?? game.userColor;
-    if (pc === "white" || pc === 1 || pc === "1") {
-      return "w";
-    }
-    if (pc === "black" || pc === 2 || pc === "2") {
-      return "b";
-    }
-
-    const myId = getViewerIdFromPage();
-    const players = game.players;
-    if (players && myId != null) {
-      const sid = String(myId);
-      const matchSlot = (slot) =>
-        slot &&
-        (String(slot.userId) === sid ||
-          String(slot.uuid) === sid ||
-          String(slot.id) === sid ||
-          String(slot.username || "")
-            .trim()
-            .toLowerCase() === me);
-
-      if (matchSlot(players.top)) {
-        const c = players.top.color ?? players.top.pieceColor;
-        if (c === "white" || c === 1 || c === "1") {
-          return "w";
-        }
-        if (c === "black" || c === 2 || c === "2") {
-          return "b";
-        }
-      }
-      if (matchSlot(players.bottom)) {
-        const c = players.bottom.color ?? players.bottom.pieceColor;
-        if (c === "white" || c === 1 || c === "1") {
-          return "w";
-        }
-        if (c === "black" || c === 2 || c === "2") {
-          return "b";
-        }
-      }
-    }
-
-    if (Array.isArray(players)) {
-      for (const slot of players) {
-        if (!slot) {
-          continue;
-        }
-        const un = normalizeHeaderName(String(slot.username || slot.name || slot.handle || ""));
-        if (me && un && usernameMatchesHeader(me, un)) {
-          const c = slot.color ?? slot.pieceColor ?? slot.side;
-          if (c === "white" || c === 1 || c === "1") {
-            return "w";
-          }
-          if (c === "black" || c === 2 || c === "2") {
-            return "b";
-          }
-        }
-      }
-    }
-
-    return null;
-  }
-
-  function resolveViewerColor(gameData) {
-    const parsed = parseViewerColorFromGameData(gameData);
-    if (parsed) {
-      return parsed;
-    }
-    return detectBoardOrientation() === "black" ? "b" : "w";
+    return "w";
   }
 
   function ensureUi() {
@@ -3583,7 +3360,7 @@
       <div class="crf-header">
         <div>
           <h1 class="crf-page-title">Chess Move Coach</h1>
-          <p class="crf-subtitle">Independent review with a local Stockfish engine in its own tab.</p>
+          <p class="crf-subtitle">Standalone review with a local Stockfish engine in its own tab.</p>
         </div>
       </div>
       <div class="crf-scroll">
@@ -3591,12 +3368,12 @@
           <div class="crf-hero-main">
             <div class="crf-result-badge" id="crf-result-badge" data-result="draw">Independent Analysis</div>
             <div class="crf-reason-label" id="crf-reason-label">Ready to analyze</div>
-            <div class="crf-reason-text" id="crf-reason-text">Click the extension on a finished Chess.com game to open a full analysis here.</div>
+            <div class="crf-reason-text" id="crf-reason-text">Paste a PGN below to load a game and run a full local analysis.</div>
             <button class="crf-cta" id="crf-analyze" type="button" hidden>Run Analysis Again</button>
             <div class="crf-progress">
               <div class="crf-progress-bar" id="crf-progress-bar"></div>
             </div>
-            <p class="crf-muted" id="crf-status">Open a finished Chess.com game and click the extension button to analyze it here.</p>
+            <p class="crf-muted" id="crf-status">Paste a PGN to start analyzing this game locally.</p>
           </div>
           <div class="crf-hero-side">
             <div class="crf-hero-stat">
@@ -3611,6 +3388,20 @@
               <div class="crf-reason-label" id="crf-focus-label">What to work on next</div>
               <div class="crf-focus-text" id="crf-focus-text">The analyzer will turn the biggest swing into one practical improvement to carry into your next game.</div>
             </div>
+          </div>
+        </section>
+        <section class="crf-card">
+          <div class="crf-row">
+            <strong>Load PGN</strong>
+            <span class="crf-muted">Paste one full game score to analyze it locally</span>
+          </div>
+          <textarea id="crf-pgn-input" class="crf-pgn-input" spellcheck="false" placeholder="[Event &quot;Casual Game&quot;]
+[Site &quot;Local&quot;]
+[Result &quot;1-0&quot;]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6"></textarea>
+          <div class="crf-board-actions">
+            <button class="crf-nav" id="crf-load-pgn" type="button">Load PGN</button>
           </div>
         </section>
         <section class="crf-card">
@@ -3702,6 +3493,8 @@
     state.summary = root.querySelector("#crf-summary");
     state.moves = root.querySelector("#crf-moves");
     state.chart = root.querySelector("#crf-chart");
+    state.pgnInput = root.querySelector("#crf-pgn-input");
+    state.loadPgnButton = root.querySelector("#crf-load-pgn");
     state.board = root.querySelector("#crf-board");
     state.boardCoordinates = root.querySelector("#crf-board-coordinates");
     state.boardCaption = root.querySelector("#crf-board-caption");
@@ -3717,6 +3510,9 @@
     state.evalBottom = root.querySelector("#crf-eval-bottom");
     state.analyzeButton = root.querySelector("#crf-analyze");
     state.analyzeButton.addEventListener("click", runAnalysis);
+    state.loadPgnButton.addEventListener("click", () => {
+      void loadPgnFromTextarea();
+    });
     state.prevMoveButton.addEventListener("click", () => stepBoard(-1));
     state.nextMoveButton.addEventListener("click", () => stepBoard(1));
     state.engineMoveButton.addEventListener("click", () => {
@@ -3734,7 +3530,7 @@
     setReviewHero(
       {
         result: "draw",
-        reasonText: "Click the extension on a finished Chess.com game to open a full analysis here.",
+        reasonText: "Paste a PGN to load a game and open a full analysis here.",
         adviceText: "After analysis runs, this workspace will show one practical fix to carry into your next game.",
         blunders: 0,
         mistakes: 0,
@@ -4608,107 +4404,8 @@
     renderBoardAtPly(state.currentPlyIndex);
   }
 
-  function decodeTcn(tcn) {
-    const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!?{~}(^)[_]@#$,./&-*++=";
-    const promoPieces = "qnrbkp";
-    const moves = [];
-
-    function indexToSquare(index) {
-      const file = index % 8;
-      const rank = Math.floor(index / 8) + 1;
-      return `${"abcdefgh"[file]}${rank}`;
-    }
-
-    for (let i = 0; i < tcn.length; i += 2) {
-      let code1 = alphabet.indexOf(tcn[i]);
-      let code2 = alphabet.indexOf(tcn[i + 1]);
-      const move = {};
-
-      if (code1 < 0 || code2 < 0) {
-        throw new Error("Chess.com returned an unreadable move list.");
-      }
-
-      if (code2 > 63) {
-        const promoIndex = Math.floor((code2 - 64) / 3);
-        move.promotion = promoPieces[promoIndex];
-        const offset = ((code2 - 1) % 3) - 1;
-        const direction = code1 < 16 ? -8 : 8;
-        code2 = code1 + direction + offset;
-      }
-
-      if (code1 > 75) {
-        move.drop = promoPieces[code1 - 79];
-      } else {
-        move.from = indexToSquare(code1);
-      }
-
-      move.to = indexToSquare(code2);
-      moves.push(move);
-    }
-
-    return moves;
-  }
-
   function toMoveNumber(plyIndex, color) {
     return color === "w" ? Math.floor(plyIndex / 2) + 1 : Math.ceil((plyIndex + 1) / 2);
-  }
-
-  function buildMoveList(gameData) {
-    const tcn = gameData?.game?.moveList;
-
-    if (!tcn) {
-      throw new Error("This game page did not expose a move list.");
-    }
-
-    const initialFen = gameData?.game?.fen || undefined;
-    const chess = initialFen ? new Chess(initialFen) : new Chess();
-    const decodedMoves = decodeTcn(tcn);
-    const moves = [];
-
-    decodedMoves.forEach((move, index) => {
-      if (move.drop) {
-        throw new Error("Variant drop moves are not supported in this MVP.");
-      }
-
-      const beforeFen = chess.fen();
-      const played = chess.move({
-        from: move.from,
-        to: move.to,
-        promotion: move.promotion || "q"
-      });
-
-      if (!played) {
-        throw new Error(`Illegal move encountered at ply ${index + 1}.`);
-      }
-
-      const previousMoveMeta = moves.length
-        ? {
-            color: moves[moves.length - 1].color,
-            from: moves[moves.length - 1].from,
-            to: moves[moves.length - 1].to,
-            san: moves[moves.length - 1].san,
-            uci: moves[moves.length - 1].uci,
-            wasCapture: Boolean(moves[moves.length - 1].capturedPiece),
-            wasCheck: /[+#]/.test(moves[moves.length - 1].san || "")
-          }
-        : null;
-
-      moves.push({
-        plyIndex: index,
-        moveNumber: toMoveNumber(index, played.color),
-        color: played.color,
-        beforeFen,
-        afterFen: chess.fen(),
-        from: played.from,
-        to: played.to,
-        uci: `${played.from}${played.to}${played.promotion || ""}`,
-        san: played.san,
-        capturedPiece: played.captured || null,
-        previousMoveMeta
-      });
-    });
-
-    return moves;
   }
 
   class StockfishClient {
@@ -4880,23 +4577,6 @@
     return state.stockfish;
   }
 
-  async function fetchGameData(gameId) {
-    const response = await fetch(`https://www.chess.com/callback/live/game/${gameId}`, {
-      credentials: "include"
-    });
-
-    if (!response.ok) {
-      throw new Error("Could not load this Chess.com game.");
-    }
-
-    return response.json();
-  }
-
-  function isFinishedGame(gameData) {
-    const result = gameData?.game?.pgnHeaders?.Result;
-    return Boolean(result && result !== "*");
-  }
-
   function buildMoveListFromPgn(pgnText) {
     const parser = new Chess();
 
@@ -4977,30 +4657,32 @@
     }
   }
 
-  async function loadStoredImport(options = {}) {
+  async function loadPgnFromTextarea() {
     try {
-      const { silent = false } = options;
-      const stored = await storageGet([IMPORT_STORAGE_KEY]);
-      const imported = stored?.[IMPORT_STORAGE_KEY];
+      ensureUi();
+      const pgnText = state.pgnInput?.value?.trim() || "";
 
-      if (!imported?.gameData) {
-        if (!silent) {
-          throw new Error("No imported Chess.com game was found yet. Use the popup on a finished game first.");
-        }
-        return;
+      if (!pgnText) {
+        throw new Error("Paste a PGN first.");
       }
 
+      const parsed = buildMoveListFromPgn(pgnText);
+      const viewerColor = inferViewerColorFromHeaders(parsed.gameData?.game?.pgnHeaders || {});
+
       setLoadedInput({
-        type: "chesscom",
-        gameData: imported.gameData,
-        moves: null,
-        requiresFinished: true,
-        viewerColor: imported.viewerColor || "w",
-        gameId: imported.gameId || null
+        type: "pgn",
+        gameData: parsed.gameData,
+        moves: parsed.moves,
+        viewerColor,
+        gameId: `pgn-${Date.now()}`
       });
-      setStatus("Imported Chess.com game loaded.");
+
+      state.viewerColor = viewerColor;
+      state.boardOrientation = viewerColorToBoardOrientation(viewerColor);
+      setStatus("PGN loaded. Starting analysis...");
+      await runAnalysis();
     } catch (error) {
-      setStatus(runtimeSafeMessage(error));
+      setStatus(runtimeSafeMessage(error, "Could not load that PGN."));
     }
   }
 
@@ -5050,7 +4732,7 @@
       const input = state.loadedInput;
 
       if (!input?.gameData) {
-        throw new Error("Open a finished Chess.com game and click the extension button to analyze it here.");
+        throw new Error("Paste a PGN to start the analysis.");
       }
 
       resetAnalysisBoard();
@@ -5065,14 +4747,10 @@
 
       const gameData = input.gameData;
 
-      if (input.requiresFinished && !isFinishedGame(gameData)) {
-        throw new Error("This Chess.com import is not finished yet. Open a completed game first.");
-      }
-
       state.viewerColor = input.viewerColor || "w";
       state.boardOrientation = viewerColorToBoardOrientation(state.viewerColor);
 
-      const moves = input.moves || buildMoveList(gameData);
+      const moves = input.moves;
       state.currentMoves = moves;
       state.currentResults = [];
       state.currentPlyIndex = 0;
@@ -5177,58 +4855,13 @@
     }
   }
 
-  async function getCurrentFinishedGamePayload() {
-    const gameId = parseGameId();
-
-    if (!gameId) {
-      throw new Error("Open a Chess.com live game page first.");
-    }
-
-    const gameData = await fetchGameData(gameId);
-
-    if (!isFinishedGame(gameData)) {
-      throw new Error("This extension only imports finished Chess.com games.");
-    }
-
-    const viewerColor = resolveViewerColor(gameData);
-    return {
-      gameId,
-      gameData,
-      viewerColor,
-      description: `Imported Chess.com game ${gameId}.`
-    };
-  }
-
-  function registerImportListener() {
-    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-      if (message?.type !== "crf:get-finished-game") {
-        return false;
-      }
-
-      void getCurrentFinishedGamePayload()
-        .then((payload) => sendResponse({ ok: true, payload }))
-        .catch((error) => sendResponse({ ok: false, error: runtimeSafeMessage(error) }));
-
-      return true;
-    });
-  }
-
   async function bootstrapAnalyzerPage() {
     ensureUi();
     state.analyzeButton.disabled = true;
-    setStatus("Open a finished Chess.com game and click the extension button to analyze it here.");
-    await loadStoredImport({ silent: true });
-    if (state.loadedInput?.gameData) {
-      state.viewerColor = state.loadedInput.viewerColor || "w";
-      state.boardOrientation = viewerColorToBoardOrientation(state.viewerColor);
-      void runAnalysis();
-    } else {
-      state.viewerColor = "w";
-      state.boardOrientation = viewerColorToBoardOrientation(state.viewerColor);
-    }
+    state.viewerColor = "w";
+    state.boardOrientation = viewerColorToBoardOrientation(state.viewerColor);
+    setStatus("Paste a PGN to start analyzing this game locally.");
   }
-
-  registerImportListener();
 
   if (IS_ANALYZER_PAGE) {
     void bootstrapAnalyzerPage();
