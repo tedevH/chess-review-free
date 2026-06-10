@@ -22,6 +22,46 @@
   --crf-piece-stroke: #304762;
 }
 
+:root[data-crf-theme="forest"] {
+  --crf-bg: #0d1811;
+  --crf-panel: #14241a;
+  --crf-panel-soft: #1c3124;
+  --crf-panel-elevated: rgba(16, 34, 24, 0.9);
+  --crf-card-lite: rgba(255, 255, 255, 0.05);
+  --crf-border: rgba(129, 185, 113, 0.2);
+  --crf-text: #edf7ef;
+  --crf-text-soft: #bfd5c2;
+  --crf-muted: #94b09a;
+  --crf-accent: #7ccf7a;
+  --crf-accent-strong: #4ca861;
+  --crf-shadow: 0 18px 48px rgba(5, 14, 8, 0.42);
+  --crf-board-light: #eef5ea;
+  --crf-board-dark: #6f8f67;
+  --crf-piece-light: #fcfffb;
+  --crf-piece-dark: #102014;
+  --crf-piece-stroke: #2d4e35;
+}
+
+:root[data-crf-theme="ember"] {
+  --crf-bg: #1d1210;
+  --crf-panel: #2a1915;
+  --crf-panel-soft: #36211c;
+  --crf-panel-elevated: rgba(45, 25, 19, 0.9);
+  --crf-card-lite: rgba(255, 255, 255, 0.05);
+  --crf-border: rgba(232, 140, 94, 0.2);
+  --crf-text: #fff2eb;
+  --crf-text-soft: #e9c8b7;
+  --crf-muted: #c99c87;
+  --crf-accent: #f08a5d;
+  --crf-accent-strong: #d86a3d;
+  --crf-shadow: 0 18px 48px rgba(20, 8, 4, 0.45);
+  --crf-board-light: #f8eee9;
+  --crf-board-dark: #9f6b58;
+  --crf-piece-light: #fffaf6;
+  --crf-piece-dark: #26130f;
+  --crf-piece-stroke: #5a372b;
+}
+
 #crf-launcher {
   position: fixed;
   right: 24px;
@@ -75,6 +115,84 @@
     var(--crf-panel-elevated);
   border-bottom: 1px solid var(--crf-border);
   cursor: move;
+  position: relative;
+}
+
+.crf-header-actions {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.crf-settings-button {
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--crf-border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--crf-text);
+  font: 700 17px/1 inherit;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(2, 8, 23, 0.18);
+}
+
+.crf-settings-button:hover,
+.crf-settings-button[aria-expanded="true"] {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.crf-theme-menu {
+  position: absolute;
+  top: 46px;
+  right: 0;
+  min-width: 160px;
+  padding: 10px;
+  border: 1px solid var(--crf-border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--crf-panel) 84%, black 16%);
+  box-shadow: var(--crf-shadow);
+  z-index: 20;
+}
+
+.crf-theme-menu-label {
+  margin-bottom: 8px;
+  color: var(--crf-text-soft);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.crf-theme-option {
+  width: 100%;
+  margin-top: 6px;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--crf-text);
+  text-align: left;
+  font: 600 13px/1.2 inherit;
+  cursor: pointer;
+}
+
+.crf-theme-option:first-of-type {
+  margin-top: 0;
+}
+
+.crf-theme-option:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.crf-theme-option[data-active="true"] {
+  border-color: var(--crf-accent);
+  background: rgba(69, 199, 193, 0.14);
+  color: var(--crf-text);
 }
 
 .crf-title {
@@ -283,6 +401,8 @@
 }
 
 .crf-piece {
+  position: relative;
+  z-index: 1;
   font-size: clamp(22px, 2.2vw, 34px);
   line-height: 1;
   user-select: none;
@@ -343,18 +463,24 @@ svg path {
 
 .crf-square-sticker {
   position: absolute;
-  top: 4px;
-  right: 4px;
+  top: 3px;
+  right: 3px;
+  z-index: 3;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 26px;
-  height: 26px;
-  padding: 0 6px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 5px;
   border-radius: 999px;
-  font-size: 12px;
-  font-weight: 800;
-  box-shadow: 0 8px 18px rgba(2, 8, 23, 0.35);
+  border: 1.5px solid rgba(248, 250, 252, 0.96);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+  text-shadow: 0 1px 1px rgba(2, 8, 23, 0.45);
+  box-shadow:
+    0 8px 16px rgba(2, 8, 23, 0.42),
+    0 0 0 1px rgba(2, 8, 23, 0.28);
 }
 
 .crf-board-controls {
@@ -582,28 +708,49 @@ svg path {
 }
 
 .crf-sticker-best {
-  background: rgba(34, 197, 94, 0.18);
-  color: #86efac;
+  background: linear-gradient(180deg, #15803d, #14532d);
+  color: #f7fee7;
+}
+
+.crf-sticker-good {
+  background: linear-gradient(180deg, #16a34a, #166534);
+  color: #f7fee7;
+}
+
+.crf-sticker-brilliant {
+  background: linear-gradient(180deg, #38bdf8, #1d4ed8);
+  color: #f8fbff;
 }
 
 .crf-sticker-excellent {
-  background: rgba(59, 130, 246, 0.18);
-  color: #93c5fd;
+  background: linear-gradient(180deg, #2563eb, #1e3a8a);
+  color: #ffffff;
+}
+
+.crf-sticker-excellent::before {
+  content: "";
+  width: 12px;
+  height: 12px;
+  display: block;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M2 21h4V9H2v12zm20-11c0-1.1-.9-2-2-2h-6.3l1-4.6.1-.6c0-.4-.2-.8-.4-1.1L13.3 1 7.6 6.7C7.2 7.1 7 7.6 7 8.2V19c0 1.1.9 2 2 2h8c.8 0 1.5-.5 1.8-1.2l3-7c.1-.2.2-.5.2-.8v-2z'/%3E%3C/svg%3E");
 }
 
 .crf-sticker-inaccuracy {
-  background: rgba(245, 158, 11, 0.18);
-  color: #fde68a;
+  background: linear-gradient(180deg, #f59e0b, #d97706);
+  color: #fff7ed;
 }
 
 .crf-sticker-mistake {
-  background: rgba(249, 115, 22, 0.2);
-  color: #fdba74;
+  background: linear-gradient(180deg, #f97316, #c2410c);
+  color: #fff7ed;
 }
 
 .crf-sticker-blunder {
-  background: rgba(239, 68, 68, 0.22);
-  color: #fca5a5;
+  background: linear-gradient(180deg, #ef4444, #b91c1c);
+  color: #fef2f2;
 }
 
 @media (max-width: 768px) {
@@ -993,12 +1140,33 @@ svg path {
 }
 
 .crf-result-badge[data-result="win"],
+.crf-sticker-brilliant,
 .crf-best,
 .crf-good-badge,
 .crf-sticker-best,
 .crf-sticker-excellent {
   background: rgba(129, 182, 76, 0.16);
   color: #d8efc2;
+}
+
+.crf-square-sticker.crf-sticker-best {
+  background: linear-gradient(180deg, #15803d, #14532d);
+  color: #f7fee7;
+}
+
+.crf-square-sticker.crf-sticker-good {
+  background: linear-gradient(180deg, #16a34a, #166534);
+  color: #f7fee7;
+}
+
+.crf-square-sticker.crf-sticker-brilliant {
+  background: linear-gradient(180deg, #2563eb, #1e3a8a);
+  color: #f8fbff;
+}
+
+.crf-square-sticker.crf-sticker-excellent {
+  background: linear-gradient(180deg, #1d4ed8, #1e3a8a);
+  color: #ffffff;
 }
 
 .crf-result-badge[data-result="loss"],

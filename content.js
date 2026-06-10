@@ -41,7 +41,13 @@
 
   const PANEL_ID = "crf-root";
   const PENDING_IMPORT_STORAGE_KEY = "casPendingImport";
+  const THEME_STORAGE_KEY = "casTheme";
   const IS_ANALYZER_PAGE = window.location.pathname.endsWith("/analyzer.html");
+  const THEMES = {
+    ocean: "Ocean",
+    forest: "Forest",
+    ember: "Ember"
+  };
 
   const state = {
     root: null,
@@ -62,6 +68,9 @@
     pgnInput: null,
     loadPgnButton: null,
     uploadPgnButton: null,
+    perspectiveButton: null,
+    settingsButton: null,
+    themeMenu: null,
     pgnFileInput: null,
     boardCard: null,
     board: null,
@@ -97,6 +106,7 @@
     deepEvalToken: 0,
     loadedInput: null,
     currentGameId: null,
+    theme: "ocean",
     destroyed: false
   };
 
@@ -113,6 +123,19 @@
         }
 
         resolve(value);
+      });
+    });
+  }
+
+  function storageSet(value) {
+    return new Promise((resolve, reject) => {
+      chrome.storage.local.set(value, () => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+
+        resolve();
       });
     });
   }
@@ -2487,7 +2510,7 @@
   }
 
   function detectConcepts(move, features) {
-    const isPositive = ["Best", "Excellent", "Good"].includes(move.label);
+    const isPositive = ["Brilliant", "Best", "Excellent", "Good"].includes(move.label);
     const concepts = [];
     let category = isPositive ? "piece_improvement" : "missed_threat";
 
@@ -2791,7 +2814,7 @@
     const explanationMode = classifyExplanationMode(move, features, conceptData);
     const consequences = evaluateMoveConsequences(move, features, conceptData);
     const effectiveLabel = inferredMoveLabel(move) || "Move";
-    const isPositive = ["Best", "Excellent", "Good"].includes(effectiveLabel);
+    const isPositive = ["Brilliant", "Best", "Excellent", "Good"].includes(effectiveLabel);
     const played = move.san || move.moveSan || "your move";
     const labelText = effectiveLabel.toLowerCase();
     const movePurposeText = summarizeMovePurposes(movePurpose);
@@ -3374,6 +3397,103 @@
     return "w";
   }
 
+  function resolveViewerColor(candidate, fallback = "w") {
+    if (candidate === "b" || candidate === "black") {
+      return "b";
+    }
+    if (candidate === "w" || candidate === "white") {
+      return "w";
+    }
+    return fallback;
+  }
+
+  function updateThemeMenu() {
+    if (!state.themeMenu) {
+      return;
+    }
+
+    state.themeMenu.querySelectorAll("[data-theme-option]").forEach((button) => {
+      const isActive = button.getAttribute("data-theme-option") === state.theme;
+      button.dataset.active = isActive ? "true" : "false";
+      button.setAttribute("aria-pressed", isActive ? "true" : "false");
+    });
+  }
+
+  async function setTheme(themeName, { persist = true } = {}) {
+    const nextTheme = THEMES[themeName] ? themeName : "ocean";
+    state.theme = nextTheme;
+    document.documentElement.setAttribute("data-crf-theme", nextTheme);
+    updateThemeMenu();
+
+    if (!persist) {
+      return;
+    }
+
+    try {
+      await storageSet({ [THEME_STORAGE_KEY]: nextTheme });
+    } catch (error) {
+      console.error("Could not save theme", error);
+    }
+  }
+
+  async function loadSavedTheme() {
+    try {
+      const stored = await storageGet([THEME_STORAGE_KEY]);
+      await setTheme(stored?.[THEME_STORAGE_KEY] || "ocean", { persist: false });
+    } catch (error) {
+      console.error("Could not load saved theme", error);
+      await setTheme("ocean", { persist: false });
+    }
+  }
+
+  function toggleThemeMenu(forceExpanded) {
+    if (!state.settingsButton || !state.themeMenu) {
+      return;
+    }
+
+    const expanded = typeof forceExpanded === "boolean"
+      ? forceExpanded
+      : state.settingsButton.getAttribute("aria-expanded") !== "true";
+
+    state.settingsButton.setAttribute("aria-expanded", expanded ? "true" : "false");
+    state.themeMenu.hidden = !expanded;
+  }
+
+  function updatePerspectiveButton() {
+    if (!state.perspectiveButton) {
+      return;
+    }
+
+    state.perspectiveButton.textContent = `Playing as ${state.viewerColor === "b" ? "Black" : "White"}`;
+  }
+
+  function setViewerPerspective(color, { rerender = true } = {}) {
+    state.viewerColor = resolveViewerColor(color, state.viewerColor || "w");
+    state.boardOrientation = viewerColorToBoardOrientation(state.viewerColor);
+
+    if (state.loadedInput) {
+      state.loadedInput.viewerColor = state.viewerColor;
+    }
+
+    updatePerspectiveButton();
+
+    if (!rerender || !state.root) {
+      return;
+    }
+
+    renderBoardAtPly(state.currentPlyIndex || 0);
+
+    if (state.currentResults.length) {
+      renderSummary(state.currentResults);
+      renderChart(state.currentResults);
+      if (state.loadedInput?.gameData) {
+        setReviewHero(buildReviewSummary(state.loadedInput.gameData, state.currentResults));
+      }
+    } else {
+      updateEvalBar(state.currentPlyIndex || 0);
+    }
+  }
+
   function ensureUi() {
     if (!IS_ANALYZER_PAGE || state.root) {
       return;
@@ -3390,6 +3510,15 @@
         <div>
           <h1 class="crf-page-title">Chess Analysis Studio</h1>
           <p class="crf-subtitle">General-purpose local analysis with optional game import and direct PGN input.</p>
+        </div>
+        <div class="crf-header-actions">
+          <button class="crf-settings-button" id="crf-settings-button" type="button" aria-expanded="false" aria-controls="crf-theme-menu" title="Theme settings">⚙</button>
+          <div class="crf-theme-menu" id="crf-theme-menu" hidden>
+            <div class="crf-theme-menu-label">Color Theme</div>
+            <button class="crf-theme-option" data-theme-option="ocean" type="button">Ocean</button>
+            <button class="crf-theme-option" data-theme-option="forest" type="button">Forest</button>
+            <button class="crf-theme-option" data-theme-option="ember" type="button">Ember</button>
+          </div>
         </div>
       </div>
       <div class="crf-scroll">
@@ -3477,6 +3606,7 @@
             <button class="crf-nav" id="crf-next-move" type="button">Next</button>
           </div>
           <div class="crf-board-actions">
+            <button class="crf-nav" id="crf-toggle-perspective" type="button">Playing as White</button>
             <button class="crf-nav" id="crf-engine-move" type="button">Play Engine Move</button>
             <button class="crf-nav" id="crf-reset-line" type="button">Return to Loaded Line</button>
           </div>
@@ -3527,6 +3657,9 @@
     state.pgnInput = root.querySelector("#crf-pgn-input");
     state.loadPgnButton = root.querySelector("#crf-load-pgn");
     state.uploadPgnButton = root.querySelector("#crf-upload-pgn");
+    state.perspectiveButton = root.querySelector("#crf-toggle-perspective");
+    state.settingsButton = root.querySelector("#crf-settings-button");
+    state.themeMenu = root.querySelector("#crf-theme-menu");
     state.pgnFileInput = root.querySelector("#crf-pgn-file");
     state.board = root.querySelector("#crf-board");
     state.boardCoordinates = root.querySelector("#crf-board-coordinates");
@@ -3554,6 +3687,19 @@
     });
     state.prevMoveButton.addEventListener("click", () => stepBoard(-1));
     state.nextMoveButton.addEventListener("click", () => stepBoard(1));
+    state.perspectiveButton.addEventListener("click", () => {
+      setViewerPerspective(state.viewerColor === "b" ? "w" : "b");
+    });
+    state.settingsButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      toggleThemeMenu();
+    });
+    state.themeMenu.querySelectorAll("[data-theme-option]").forEach((button) => {
+      button.addEventListener("click", () => {
+        void setTheme(button.getAttribute("data-theme-option") || "ocean");
+        toggleThemeMenu(false);
+      });
+    });
     state.engineMoveButton.addEventListener("click", () => {
       void playEngineMove();
     });
@@ -3564,7 +3710,21 @@
     state.board.addEventListener("click", (event) => {
       void handleBoardClick(event);
     });
+    document.addEventListener("click", (event) => {
+      if (!state.themeMenu || !state.settingsButton) {
+        return;
+      }
+      if (state.themeMenu.hidden) {
+        return;
+      }
+      if (state.themeMenu.contains(event.target) || state.settingsButton.contains(event.target)) {
+        return;
+      }
+      toggleThemeMenu(false);
+    });
     window.addEventListener("keydown", handleKeyNavigation);
+    updatePerspectiveButton();
+    updateThemeMenu();
     renderBoardAtPly(0);
     setReviewHero(
       {
@@ -3682,7 +3842,7 @@
   }
 
   function colorBadgeClass(label) {
-    if (label === "Best" || label === "Excellent") {
+    if (label === "Brilliant" || label === "Best" || label === "Excellent") {
       return "crf-best";
     }
 
@@ -3721,12 +3881,20 @@
   }
 
   function stickerForLabel(label) {
+    if (label === "Brilliant") {
+      return { text: "!!", className: "crf-sticker-brilliant", title: "Brilliant move" };
+    }
+
     if (label === "Best") {
       return { text: "★", className: "crf-sticker-best", title: "Best move" };
     }
 
     if (label === "Excellent") {
-      return { text: "✓", className: "crf-sticker-excellent", title: "Excellent move" };
+      return { text: "", className: "crf-sticker-excellent", title: "Excellent move" };
+    }
+
+    if (label === "Good") {
+      return { text: "✓", className: "crf-sticker-good", title: "Good move" };
     }
 
     if (label === "Inaccuracy") {
@@ -3766,6 +3934,37 @@
     }
 
     return "Blunder";
+  }
+
+  function isBrilliantMove(move, allPlayerMoves = []) {
+    if (!move || move.label !== "Best" || !move.bestUci || move.uci !== move.bestUci) {
+      return false;
+    }
+
+    const features = extractBoardFeatures(move, allPlayerMoves);
+    const movedPieceValue = pieceValue(features.movedPiece);
+    const capturedValue = pieceValue(features.captureInfo?.captured);
+    const materialDrop = (features.beforeMaterial || 0) - (features.afterMaterial || 0);
+    const leavesHigherValuePieceHanging = Boolean(
+      features.immediatePunish?.isHanging &&
+      features.immediatePunish?.targetSquare === move.to &&
+      movedPieceValue >= Math.max(3, capturedValue + 2)
+    );
+    const isSacrifice =
+      materialDrop >= 1 ||
+      leavesHigherValuePieceHanging;
+    const hasCompensation =
+      features.pressuredEnemyKing ||
+      createsForcingMove(features) ||
+      features.winsMaterial;
+    const isRoutine =
+      isForcedRecapture(move, features) ||
+      isNaturalRecapture(move, features) ||
+      isRoutineDevelopingMove(move, features) ||
+      isRoutineCastlingMove(move, features) ||
+      isSimpleDefensiveMove(move, features);
+
+    return Boolean(isSacrifice && hasCompensation && !isRoutine);
   }
 
   function buildMoveExplanation(move) {
@@ -4342,7 +4541,7 @@
           const playedMoverScore = perspectiveScoreForColor(afterScore, moverColor);
           const cpl = Math.max(0, Math.round(scoreToCp(bestMoverScore) - scoreToCp(playedMoverScore)));
           const accuracy = accuracyFromCpl(cpl);
-          const label = classifyMove(cpl, uci, best.bestmove);
+          let label = classifyMove(cpl, uci, best.bestmove);
           const plyIndex = state.currentPlyIndex + state.analysisMoves.length - 1;
           const normalizedMove = {
             plyIndex,
@@ -4367,6 +4566,10 @@
             bestScore,
             pvSan: pvToSan(beforeFen, best.pv)
           };
+          if (label === "Best" && isBrilliantMove(normalizedMove, state.currentResults.filter((item) => item.color === moverColor))) {
+            label = "Brilliant";
+            normalizedMove.label = label;
+          }
           const teaching = buildMoveTeachingNotes(normalizedMove);
           normalizedMove.explanation = buildMoveExplanation(normalizedMove);
           normalizedMove.category = teaching.category;
@@ -4883,8 +5086,7 @@
         gameId: `pgn-${Date.now()}`
       });
 
-      state.viewerColor = viewerColor;
-      state.boardOrientation = viewerColorToBoardOrientation(viewerColor);
+      setViewerPerspective(viewerColor);
       setStatus("PGN loaded. Starting analysis...");
       await runAnalysis();
     } catch (error) {
@@ -4929,7 +5131,11 @@
       }
 
       const parsed = buildMoveListFromPgn(pendingImport.pgnText || "");
-      const viewerColor = pendingImport.viewerColor || inferViewerColorFromHeaders(parsed.gameData?.game?.pgnHeaders || {});
+      const viewerColor =
+        resolveViewerColor(
+          pendingImport.viewerColor,
+          resolveViewerColor(pendingImport.boardOrientation, inferViewerColorFromHeaders(parsed.gameData?.game?.pgnHeaders || {}))
+        );
 
       setLoadedInput({
         type: pendingImport.provider || "pgn",
@@ -4940,7 +5146,10 @@
       });
     } else {
       const viewerColor =
-        pendingImport.viewerColor || inferViewerColorFromHeaders(pendingImport.gameData?.game?.pgnHeaders || {});
+        resolveViewerColor(
+          pendingImport.viewerColor,
+          resolveViewerColor(pendingImport.boardOrientation, inferViewerColorFromHeaders(pendingImport.gameData?.game?.pgnHeaders || {}))
+        );
 
       setLoadedInput({
         type: pendingImport.provider || "import",
@@ -4951,8 +5160,7 @@
       });
     }
 
-    state.viewerColor = state.loadedInput.viewerColor || "w";
-    state.boardOrientation = viewerColorToBoardOrientation(state.viewerColor);
+    setViewerPerspective(state.loadedInput.viewerColor || "w");
     setStatus(`Imported game data from ${pendingImport.provider === "lichess" ? "Lichess" : "the current tab"}. Starting analysis...`);
     await runAnalysis();
     return true;
@@ -5019,8 +5227,7 @@
 
       const gameData = input.gameData;
 
-      state.viewerColor = input.viewerColor || "w";
-      state.boardOrientation = viewerColorToBoardOrientation(state.viewerColor);
+      setViewerPerspective(input.viewerColor || "w", { rerender: false });
 
       const moves = input.moves || buildMoveListFromImportedData(gameData);
       state.currentMoves = moves;
@@ -5071,7 +5278,7 @@
         const playedCp = scoreToCp(playedMoverScore);
         const cpl = Math.max(0, Math.round(bestCp - playedCp));
         const accuracy = accuracyFromCpl(cpl);
-        const label = classifyMove(cpl, move.uci, best.bestmove);
+        let label = classifyMove(cpl, move.uci, best.bestmove);
         const moveData = {
           ...move,
           cpl,
@@ -5085,6 +5292,10 @@
           bestScore,
           pvSan: pvToSan(move.beforeFen, best.pv)
         };
+        if (label === "Best" && isBrilliantMove(moveData, results.filter((item) => item.color === move.color))) {
+          label = "Brilliant";
+          moveData.label = label;
+        }
         const teaching = buildMoveTeachingNotes(moveData);
 
         results.push({
@@ -5130,8 +5341,8 @@
   async function bootstrapAnalyzerPage() {
     ensureUi();
     state.analyzeButton.disabled = true;
-    state.viewerColor = "w";
-    state.boardOrientation = viewerColorToBoardOrientation(state.viewerColor);
+    setViewerPerspective("w", { rerender: false });
+    await loadSavedTheme();
     setStatus("Analyze the current game from the popup, or paste or upload a PGN here.");
     if (await loadPendingImport()) {
       return;

@@ -1,6 +1,6 @@
 # Chess Analysis Studio
 
-Chess Analysis Studio is a standalone Chrome extension for local chess analysis with visible PGN input and optional one-click game import.
+Chess Analysis Studio is a free Chrome extension for local chess analysis with visible PGN input and optional one-click game import.
 
 ## What It Does
 
@@ -9,6 +9,7 @@ Chess Analysis Studio is a standalone Chrome extension for local chess analysis 
 - accepts PGN pasted by the user
 - accepts uploaded PGN files
 - runs Stockfish locally inside the extension with no backend
+- has no accounts, subscriptions, billing, or Stripe dependency
 - shows estimated white and black accuracy
 - grades each move as `Best`, `Excellent`, `Good`, `Inaccuracy`, `Mistake`, or `Blunder`
 - draws a simple eval chart and shows the engine's best continuation

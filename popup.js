@@ -53,16 +53,43 @@ function executeImportProbe(tabId) {
         func: async () => {
           function detectBoardOrientation() {
             const board = document.querySelector("chess-board");
-            if (!board) {
-              return "white";
+            const candidates = [
+              board?.orientation,
+              board?.getAttribute?.("orientation"),
+              board?.getAttribute?.("data-orientation"),
+              board?.dataset?.orientation,
+              board?.closest?.("[data-orientation]")?.getAttribute?.("data-orientation"),
+              board?.closest?.("[orientation]")?.getAttribute?.("orientation"),
+              board?.classList?.contains("flipped") ? "black" : "",
+              board?.className,
+              document.body?.className
+            ];
+
+            for (const candidate of candidates) {
+              const value = String(candidate || "").toLowerCase();
+              if (!value) {
+                continue;
+              }
+              if (
+                value === "black" ||
+                value === "b" ||
+                value.includes("orientation-black") ||
+                value.includes("board-black") ||
+                value.includes("flipped")
+              ) {
+                return "black";
+              }
+              if (
+                value === "white" ||
+                value === "w" ||
+                value.includes("orientation-white") ||
+                value.includes("board-white")
+              ) {
+                return "white";
+              }
             }
 
-            const orientation =
-              board.orientation ||
-              board.getAttribute?.("orientation") ||
-              (board.classList.contains("flipped") ? "black" : "white");
-
-            return orientation === "black" || orientation === "b" ? "black" : "white";
+            return "white";
           }
 
           function headersToPgn(headers = {}) {
@@ -122,6 +149,7 @@ function executeImportProbe(tabId) {
               provider: "chesscom",
               format: "siteData",
               gameId,
+              boardOrientation: detectBoardOrientation(),
               viewerColor: detectBoardOrientation() === "black" ? "b" : "w",
               gameData
             };
@@ -154,6 +182,7 @@ function executeImportProbe(tabId) {
                   provider: "lichess",
                   format: "pgn",
                   gameId,
+                  boardOrientation: detectBoardOrientation(),
                   viewerColor: detectBoardOrientation() === "black" ? "b" : "w",
                   pgnText
                 };
@@ -212,6 +241,7 @@ function executeImportProbe(tabId) {
               provider: hostname || "page",
               format: "pgn",
               gameId: `page-${Date.now()}`,
+              boardOrientation: detectBoardOrientation(),
               viewerColor: detectBoardOrientation() === "black" ? "b" : "w",
               pgnText: pagePgn
             };
